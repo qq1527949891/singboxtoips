@@ -1,6 +1,6 @@
 #!/bin/bash
 
-DEFAULT_START_PORT=20000                         #默认起始端口
+DEFAULT_START_PORT=51801                         #默认起始端口
 DEFAULT_SOCKS_USERNAME="userb"                   #默认socks账号
 DEFAULT_SOCKS_PASSWORD="passwordb"               #默认socks密码
 DEFAULT_WS_PATH="/ws"                            #默认ws路径
