@@ -1,10 +1,10 @@
 #!/bin/bash
 
 DEFAULT_START_PORT=51801                         #默认起始端口
-DEFAULT_SOCKS_USERNAME="userb"                   #默认socks账号
-DEFAULT_SOCKS_PASSWORD="passwordb"               #默认socks密码
+DEFAULT_SOCKS_USERNAME="cwl"                   #默认socks账号
+DEFAULT_SOCKS_PASSWORD="666888"               #默认socks密码
 DEFAULT_WS_PATH="/ws"                            #默认ws路径
-DEFAULT_UUID="a44683f4-a789-5008-b9f8-eec7aa3c1ca4" #默认随机UUID
+DEFAULT_UUID=$(cat /proc/sys/kernel/random/uuid) #默认随机UUID
 DEFAULT_SHADOWSOCKS_PASSWORD="666888"         #默认shadowsocks密码
 DEFAULT_SHADOWSOCKS_METHOD="aes-256-gcm"         #默认shadowsocks加密方法
 DEFAULT_VLESS_UUID=$(cat /proc/sys/kernel/random/uuid) #默认VLESS UUID
@@ -58,7 +58,7 @@ config_xray() {
 		SOCKS_PASSWORD=${SOCKS_PASSWORD:-$DEFAULT_SOCKS_PASSWORD}
 	elif [ "$config_type" == "vmess" ]; then
 		read -p "UUID (默认随机): " UUID
-		UUID=${UUID:-$DEFAULT_UUID}
+		UUID="a44683f4-a789-5008-b9f8-eec7aa3c1ca4"
 		read -p "WebSocket 路径 (默认 $DEFAULT_WS_PATH): " WS_PATH
 		WS_PATH=${WS_PATH:-$DEFAULT_WS_PATH}
 	elif [ "$config_type" == "shadowsocks" ]; then
@@ -68,7 +68,7 @@ config_xray() {
 		SHADOWSOCKS_METHOD=${SHADOWSOCKS_METHOD:-$DEFAULT_SHADOWSOCKS_METHOD}
 	elif [ "$config_type" == "vless" ]; then
 		read -p "VLESS UUID (默认随机): " VLESS_UUID
-		VLESS_UUID=${VLESS_UUID:-$DEFAULT_VLESS_UUID}
+		VLESS_UUID="a44683f4-a789-5008-b9f8-eec7aa3c1ca4"
 		read -p "VLESS WebSocket 路径 (默认 $DEFAULT_VLESS_WS_PATH): " VLESS_WS_PATH
 		VLESS_WS_PATH=${VLESS_WS_PATH:-$DEFAULT_VLESS_WS_PATH}
 		
