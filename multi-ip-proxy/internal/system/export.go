@@ -16,9 +16,13 @@ import (
 func exportFiles(s model.State) (map[string][]byte, error) { return export.Files(s) }
 
 func managedRead(l Layout, state, output string, read func() error) error {
+	return managedReadWithLock(l, state, output, lock, read)
+}
+
+func managedReadWithLock(l Layout, state, output string, acquire func(string) (func(), error), read func() error) error {
 	absolute := func(path string) string { p, _ := filepath.Abs(path); return filepath.Clean(p) }
 	if absolute(state) == absolute(l.State) || output != "" && absolute(output) == absolute(l.Exports) {
-		unlock, err := lock(l.Lock)
+		unlock, err := acquire(l.Lock)
 		if err != nil {
 			return err
 		}
@@ -39,6 +43,23 @@ func Export(l Layout, state, output string) error {
 			return err
 		}
 		return store.Export(s, output)
+	})
+}
+
+func ShowSubscriptions(l Layout, out io.Writer) error {
+	return managedRead(l, l.State, "", func() error {
+		state, err := model.Load(l.State)
+		if err != nil {
+			return err
+		}
+		links := export.Subscriptions(state)
+		if len(links) == 0 {
+			return fmt.Errorf("当前配置没有 HTTPS 订阅，请通过向导创建/更新 Trojan、Hysteria2、TUIC 或 WireGuard 节点")
+		}
+		for _, link := range links {
+			fmt.Fprintf(out, "%s：\n%s\n", link.Name, link.URL)
+		}
+		return nil
 	})
 }
 

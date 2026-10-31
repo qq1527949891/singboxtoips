@@ -148,6 +148,9 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		return s, err
 	}
 	s.Protocol = protocol
+	if !s.SupportsSubscription() {
+		s.SubscriptionToken, s.SubscriptionPort = "", 0
+	}
 	if s.Protocol == "reality" && old != nil && old.Protocol != "reality" {
 		s.ServerName, s.RealityTarget, s.RealityPort = "www.microsoft.com", "www.microsoft.com", 443
 	}
@@ -205,7 +208,7 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 			return s, err
 		}
 	} else {
-		fmt.Fprintf(u.Out, "自动选择全部地址；%s：%d/%s。自定义可运行 wizard --advanced。\n", portPrompt, s.Port, s.Network())
+		fmt.Fprintf(u.Out, "自动选择全部地址；%s：%d/%s。自定义可运行 mip-proxy wizard --advanced。\n", portPrompt, s.Port, s.Network())
 	}
 	pairs := map[string]bool{}
 	for _, i := range chosen {
@@ -325,9 +328,37 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 			return s, err
 		}
 	}
-	if s.NeedsTLS() {
+	if s.SupportsSubscription() {
+		if s.SubscriptionToken == "" {
+			s.SubscriptionToken, err = model.NewSubscriptionToken()
+			if err != nil {
+				return s, err
+			}
+		}
+	}
+	if s.NeedsCertificate() {
 		if err = u.Certificate(&s); err != nil {
 			return s, err
+		}
+	}
+	if s.SubscriptionEnabled() {
+		if s.SubscriptionPort == 0 || (s.SubscriptionPort == s.Port && strings.Contains(s.Network(), "tcp")) {
+			s.SubscriptionPort = 443
+			if strings.Contains(s.Network(), "tcp") {
+				s.SubscriptionPort = 8443
+			}
+			if inventory == "" {
+				s.SubscriptionPort, err = network.RecommendedTCPPort(ctx, r, s.CertificateNode().LocalIP, s.SubscriptionPort)
+				if err != nil {
+					return s, err
+				}
+			}
+		}
+		if u.Advanced {
+			s.SubscriptionPort, err = u.Number("HTTPS 订阅监听端口（TCP，需允许公网访问）", s.SubscriptionPort, 1, 65535)
+			if err != nil {
+				return s, err
+			}
 		}
 	}
 	if s.Protocol == "hysteria2" && u.Advanced {
@@ -437,6 +468,9 @@ func (u *UI) Summary(s model.State) {
 	fmt.Fprintln(u.Out, "全部节点仅使用 IPv4；正式部署会禁用整台服务器的 IPv6。")
 	if s.AutomaticCertificate() {
 		fmt.Fprintf(u.Out, "证书：自动申请/续期；验证 IP %s 的 TCP 80 需允许公网访问。\n", s.ServerName)
+	}
+	if s.SubscriptionEnabled() {
+		fmt.Fprintf(u.Out, "HTTPS 订阅：%s:%d；该 TCP 端口需允许公网访问。\n", s.ServerName, s.SubscriptionPort)
 	}
 	for _, n := range s.Nodes {
 		fmt.Fprintf(u.Out, "  %s -> 本机 %s:%d -> 预期出口 %s  策略路由=%t\n", s.Endpoint(n), n.LocalIP, s.ListenPort(n), n.PublicIP, n.PolicyRouting)

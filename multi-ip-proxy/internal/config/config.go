@@ -50,7 +50,7 @@ func ServerWithACMEDirectory(s model.State, acmeDirectory string) (Object, error
 		return nil, err
 	}
 	var cert, key []string
-	if s.NeedsTLS() && !s.AutomaticCertificate() {
+	if s.NeedsCertificate() && !s.AutomaticCertificate() {
 		var err error
 		cert, key, err = Certificate(s)
 		if err != nil {
@@ -119,7 +119,7 @@ func ServerWithACMEDirectory(s model.State, acmeDirectory string) (Object, error
 				in["bind_interface"] = n.Interface
 			}
 		}
-		if s.AutomaticCertificate() {
+		if s.NeedsTLS() && s.AutomaticCertificate() {
 			tls := in["tls"].(Object)
 			delete(tls, "certificate")
 			delete(tls, "key")

@@ -138,30 +138,7 @@ func TestAutomaticIPCertificateAndTwoNodeClients(t *testing.T) {
 			provider := server["certificate_providers"].([]any)[0].(config.Object)
 			provider["provider"] = "https://127.0.0.1:14000/dir"
 			startCore(t, core, server)
-			var leaf *x509.Certificate
-			deadline := time.Now().Add(35 * time.Second)
-			for time.Now().Before(deadline) && leaf == nil {
-				paths, _ := filepath.Glob(filepath.Join(cache, "certificates", "*", "*", "*.crt"))
-				for _, path := range paths {
-					data, _ := os.ReadFile(path)
-					block, _ := pem.Decode(data)
-					if block != nil {
-						candidate, parseErr := x509.ParseCertificate(block.Bytes)
-						if parseErr == nil && candidate.VerifyHostname(s.ServerName) == nil {
-							leaf = candidate
-						}
-					}
-				}
-				if leaf == nil {
-					time.Sleep(100 * time.Millisecond)
-				}
-			}
-			if leaf == nil {
-				t.Fatal("ACME did not complete real HTTP-01 validation and cache an IP certificate")
-			}
-			if leaf.PublicKeyAlgorithm != x509.ECDSA {
-				t.Fatal("incompatible automatic key algorithm")
-			}
+			leaf := waitTestIPCertificate(t, cache, s.ServerName)
 			base := 42000 + index*10
 			client := export.ProbeClient(s, base)
 			for _, node := range client["outbounds"].([]any) {
@@ -208,8 +185,57 @@ func TestAutomaticIPCertificateAndTwoNodeClients(t *testing.T) {
 			}
 		})
 	}
+	t.Run("wireguard-subscription-certificate", func(t *testing.T) {
+		s := testutil.State(t, "wireguard")
+		s.SubscriptionToken, err = model.NewSubscriptionToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.SubscriptionPort, s.CertificateMode, s.ServerName = 8443, "acme-ip", s.Nodes[0].PublicIP
+		for i := range s.Nodes {
+			s.Nodes[i].LocalIP = s.Nodes[i].PublicIP
+			s.Nodes[i].Interface, s.Nodes[i].Gateway, s.Nodes[i].Prefix = "lo", "203.0.113.1", "203.0.113.0/24"
+		}
+		// A fresh cache proves an unreferenced provider starts even though the
+		// WireGuard protocol itself has no TLS inbound using that certificate.
+		freshCache := filepath.Join(dir, "wireguard-acme")
+		server, err := config.ServerWithACMEDirectory(s, freshCache)
+		if err != nil {
+			t.Fatal(err)
+		}
+		server["certificate"] = map[string]any{"certificate": []string{string(caTransportPEM)}}
+		provider := server["certificate_providers"].([]any)[0].(config.Object)
+		provider["provider"] = "https://127.0.0.1:14000/dir"
+		startCore(t, core, server)
+		waitTestIPCertificate(t, freshCache, s.ServerName)
+	})
 	data, _ := os.ReadFile(log.Name())
 	if !strings.Contains(string(data), "http://203.0.113.10:80/.well-known/acme-challenge/") {
 		t.Fatal("test CA did not perform HTTP-01 validation")
 	}
+}
+
+func waitTestIPCertificate(t *testing.T, cache, identity string) *x509.Certificate {
+	t.Helper()
+	deadline := time.Now().Add(35 * time.Second)
+	for time.Now().Before(deadline) {
+		paths, _ := filepath.Glob(filepath.Join(cache, "certificates", "*", "*", "*.crt"))
+		for _, path := range paths {
+			data, _ := os.ReadFile(path)
+			block, _ := pem.Decode(data)
+			if block == nil {
+				continue
+			}
+			candidate, err := x509.ParseCertificate(block.Bytes)
+			if err == nil && candidate.VerifyHostname(identity) == nil {
+				if candidate.PublicKeyAlgorithm != x509.ECDSA {
+					t.Fatal("incompatible automatic key algorithm")
+				}
+				return candidate
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("ACME did not complete real HTTP-01 validation and cache an IP certificate")
+	return nil
 }

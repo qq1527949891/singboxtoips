@@ -21,4 +21,6 @@ sudo sh install.sh
 
 自动证书需要验证 IP 的 TCP 80 允许公网访问。自定义 IP、端口和证书可运行 `mip-proxy wizard --advanced`。
 
-部署成功后直接在控制台打印全部节点：SOCKS5 使用 `IP/端口/用户名/密码`，Shadowsocks 使用 `IP/端口/aes-256-gcm/密码`，其他协议使用标准分享链接或原生 WireGuard 配置。
+部署成功后直接在控制台打印全部节点：SOCKS5 使用 `IP/端口/用户名/密码`，Shadowsocks 使用 `IP/端口/aes-256-gcm/密码`，其他协议使用标准分享链接。WireGuard 使用 Mihomo 单行节点格式，每个 IP 一行，同时保留原生 `.conf`。
+
+Trojan、Hysteria2、TUIC、WireGuard 部署后同时打印带随机令牌的 HTTPS 订阅地址，提供 Mihomo、sing-box 配置和对应协议的导入格式。订阅端口自动选择，需放行输出的 TCP 端口；WireGuard 的订阅证书也可直接使用公网 IP 自动申请。使用 `mip-proxy subscriptions` 可再次查看地址。

@@ -77,7 +77,7 @@ func run(ctx context.Context, args []string) error {
 		help()
 		return nil
 	case "version", "--version":
-		fmt.Printf("mip-proxy 0.1.3 / sing-box %s\n", model.CoreVersion)
+		fmt.Printf("mip-proxy 0.1.4 / sing-box %s\n", model.CoreVersion)
 		return nil
 	case "wizard":
 		inventory := fs.String("inventory", "", "本机/公网 IP 映射 CSV")
@@ -257,6 +257,20 @@ func run(ctx context.Context, args []string) error {
 			return nil
 		}
 		return err
+	case "subscriptions":
+		if len(args) == 1 || len(args) == 2 && args[1] == "show" {
+			return system.ShowSubscriptions(l, os.Stdout)
+		}
+		if len(args) != 2 || (args[1] != "serve" && args[1] != "check") {
+			return fmt.Errorf("用法：subscriptions [show|check|serve]")
+		}
+		if err := requireLinux(); err != nil {
+			return err
+		}
+		if args[1] == "check" {
+			return system.CheckSubscriptions(ctx, l)
+		}
+		return system.ServeSubscriptions(ctx, l)
 	case "demo":
 		protocol := fs.String("protocol", "reality", "协议 ID 或 all（仅离线示例）")
 		out := fs.String("out", "demo", "输出目录")
@@ -296,6 +310,12 @@ func installed(t *ui.UI, l system.Layout, s model.State) {
 	}
 	fmt.Fprintln(t.Out, "\n代理节点信息：")
 	fmt.Fprint(t.Out, nodes)
+	if links := export.Subscriptions(s); len(links) != 0 {
+		fmt.Fprintf(t.Out, "\nHTTPS 订阅地址（TCP %d 需允许公网访问）：\n", s.SubscriptionPort)
+		for _, link := range links {
+			fmt.Fprintf(t.Out, "%s：\n%s\n", link.Name, link.URL)
+		}
+	}
 }
 
 func menu(ctx context.Context, t *ui.UI, l system.Layout, r network.Runner) error {
@@ -376,6 +396,7 @@ func help() {
   doctor [--state state.json] [--core /path/to/sing-box]
   rollback
   ipv6 disable
+  subscriptions [show|check|serve]
   core --out /path/to/sing-box
   demo --protocol reality|trojan|hysteria2|vmess|tuic|shadowsocks|wireguard|socks5|all --out demo
 

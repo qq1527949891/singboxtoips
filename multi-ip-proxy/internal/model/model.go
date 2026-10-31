@@ -99,18 +99,20 @@ func (n Node) MarkPriority() int           { return n.SourcePriority() + 1 }
 func (n Node) Name(protocol string) string { return fmt.Sprintf("%s-%s", n.PublicIP, protocol) }
 
 type State struct {
-	Schema          int    `json:"schema"`
-	Protocol        string `json:"protocol"`
-	Port            int    `json:"port"`
-	ServerName      string `json:"server_name,omitempty"`
-	RealityTarget   string `json:"reality_target,omitempty"`
-	RealityPort     int    `json:"reality_port,omitempty"`
-	Certificate     string `json:"certificate,omitempty"`
-	Key             string `json:"key,omitempty"`
-	CertificateMode string `json:"certificate_mode,omitempty"`
-	ObfsPassword    string `json:"obfs_password,omitempty"`
-	CoreVersion     string `json:"core_version"`
-	Nodes           []Node `json:"nodes"`
+	Schema            int    `json:"schema"`
+	Protocol          string `json:"protocol"`
+	Port              int    `json:"port"`
+	ServerName        string `json:"server_name,omitempty"`
+	RealityTarget     string `json:"reality_target,omitempty"`
+	RealityPort       int    `json:"reality_port,omitempty"`
+	Certificate       string `json:"certificate,omitempty"`
+	Key               string `json:"key,omitempty"`
+	CertificateMode   string `json:"certificate_mode,omitempty"`
+	SubscriptionToken string `json:"subscription_token,omitempty"`
+	SubscriptionPort  int    `json:"subscription_port,omitempty"`
+	ObfsPassword      string `json:"obfs_password,omitempty"`
+	CoreVersion       string `json:"core_version"`
+	Nodes             []Node `json:"nodes"`
 }
 
 var ifacePattern = regexp.MustCompile(`^[a-zA-Z0-9_.:@-]{1,64}$`)
@@ -136,7 +138,37 @@ func (s State) NeedsTLS() bool {
 }
 
 func (s State) AutomaticCertificate() bool {
-	return s.NeedsTLS() && s.CertificateMode == "acme-ip"
+	return s.NeedsCertificate() && s.CertificateMode == "acme-ip"
+}
+
+func (s State) SupportsSubscription() bool {
+	return s.Protocol == "trojan" || s.Protocol == "hysteria2" || s.Protocol == "tuic" || s.Protocol == "wireguard"
+}
+
+func (s State) SubscriptionEnabled() bool {
+	return s.SupportsSubscription() && s.SubscriptionToken != ""
+}
+func (s State) NeedsCertificate() bool { return s.NeedsTLS() || s.SubscriptionEnabled() }
+
+func NewSubscriptionToken() (string, error) {
+	data := make([]byte, 32)
+	if _, err := rand.Read(data); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+func (s State) CertificateNode() Node {
+	for _, node := range s.Nodes {
+		if node.PublicIP == s.ServerName {
+			return node
+		}
+	}
+	return s.Nodes[0]
+}
+
+func (s State) SubscriptionListenAddress() string {
+	return net.JoinHostPort(s.CertificateNode().LocalIP, fmt.Sprint(s.SubscriptionPort))
 }
 func (s State) Network() string {
 	if s.Protocol == "hysteria2" || s.Protocol == "tuic" || s.Protocol == "wireguard" {
@@ -182,10 +214,25 @@ func (s State) Validate() error {
 	if s.CertificateMode != "" && s.CertificateMode != "acme-ip" {
 		return fmt.Errorf("未知的证书方式")
 	}
-	if s.CertificateMode != "" && !s.NeedsTLS() {
+	if s.SubscriptionToken != "" {
+		token, err := base64.RawURLEncoding.DecodeString(s.SubscriptionToken)
+		if !s.SupportsSubscription() || err != nil || len(token) != 32 || base64.RawURLEncoding.EncodeToString(token) != s.SubscriptionToken {
+			return fmt.Errorf("订阅令牌或所选协议无效")
+		}
+		if s.SubscriptionPort < 1 || s.SubscriptionPort > 65535 || s.SubscriptionPort == 80 {
+			return fmt.Errorf("订阅 HTTPS 端口无效，不能占用证书验证的 TCP 80")
+		}
+		if s.SubscriptionPort == s.Port && strings.Contains(s.Network(), "tcp") {
+			return fmt.Errorf("HTTPS 订阅端口与代理 TCP 端口冲突")
+		}
+		if ip, err := netip.ParseAddr(s.ServerName); err == nil && !ip.Is4() {
+			return fmt.Errorf("订阅地址仅支持 IPv4 或域名")
+		}
+	}
+	if s.CertificateMode != "" && !s.NeedsCertificate() {
 		return fmt.Errorf("当前协议不使用自动 TLS 证书")
 	}
-	if s.NeedsTLS() {
+	if s.NeedsCertificate() {
 		if !ValidHost(s.ServerName) {
 			return fmt.Errorf("TLS 证书域名或 IP 无效")
 		}

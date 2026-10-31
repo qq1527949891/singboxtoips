@@ -14,11 +14,12 @@ import (
 )
 
 type serviceRunner struct {
-	calls                []string
-	active, enabled      map[string]bool
-	failCheck, failStart bool
-	failStop             string
-	port80Busy           bool
+	calls                 []string
+	active, enabled       map[string]bool
+	failCheck, failStart  bool
+	failStop              string
+	port80Busy            bool
+	failSubscriptionStart bool
 }
 
 func (r *serviceRunner) Run(_ context.Context, args ...string) ([]byte, error) {
@@ -54,6 +55,9 @@ func (r *serviceRunner) Run(_ context.Context, args ...string) ([]byte, error) {
 				return nil, fmt.Errorf("disabled")
 			}
 		case "start":
+			if r.failSubscriptionStart && name == SubscriptionService {
+				return nil, fmt.Errorf("injected subscription failure")
+			}
 			if r.failStart && name == ProxyService {
 				r.failStart = false
 				return nil, fmt.Errorf("injected service failure")
@@ -191,6 +195,33 @@ func TestAutomaticCertificatePortConflictRestoresExistingDeployment(t *testing.T
 	restored, err := model.Load(l.State)
 	if err != nil || restored.Protocol != old.Protocol || !r.active[ProxyService] || !r.enabled[ProxyService] {
 		t.Fatal("previous deployment was not restored after ACME port conflict", err)
+	}
+}
+
+func TestSubscriptionFailureRestoresPreviousStateAndServices(t *testing.T) {
+	l := Paths(t.TempDir())
+	old := testutil.State(t, "reality")
+	if err := store.Atomic(l.State, model.JSON(old), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Atomic(l.SubscriptionTLS, []byte("previous private PEM"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	candidate := testutil.State(t, "trojan")
+	candidate.SubscriptionToken, _ = model.NewSubscriptionToken()
+	candidate.SubscriptionPort = 8443
+	r := runner()
+	r.failSubscriptionStart, r.active[ProxyService], r.enabled[ProxyService] = true, true, true
+	if err := Apply(context.Background(), l, r, candidate); err == nil {
+		t.Fatal("ignored subscription failure")
+	}
+	restored, err := model.Load(l.State)
+	if err != nil || restored.Protocol != old.Protocol || !r.active[ProxyService] || r.active[SubscriptionService] {
+		t.Fatal("subscription failure did not restore prior services", err)
+	}
+	data, err := os.ReadFile(l.SubscriptionTLS)
+	if err != nil || string(data) != "previous private PEM" {
+		t.Fatal("private subscription certificate was not restored", err)
 	}
 }
 

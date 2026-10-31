@@ -21,10 +21,11 @@ import (
 const ProxyService = "mip-proxy.service"
 const RoutesService = "mip-proxy-routes.service"
 const CoverService = "mip-proxy-cover.service"
+const SubscriptionService = "mip-proxy-subscription.service"
 
-var Services = []string{ProxyService, CoverService, RoutesService}
+var Services = []string{SubscriptionService, ProxyService, CoverService, RoutesService}
 
-type Layout struct{ Root, Data, State, Config, App, Core, Units, Exports, Pending, Latest, Lock, IPv6Config, ACME string }
+type Layout struct{ Root, Data, State, Config, App, Core, Units, Exports, Pending, Latest, Lock, IPv6Config, ACME, SubscriptionTLS string }
 
 func Paths(root string) Layout {
 	root = filepath.Clean(root)
@@ -36,6 +37,7 @@ func Paths(root string) Layout {
 	l.Lock = filepath.Join(l.Data, "operation.lock")
 	l.IPv6Config = filepath.Join(root, "etc/sysctl.d/99-mip-proxy-ipv6.conf")
 	l.ACME = filepath.Join(l.Data, "acme")
+	l.SubscriptionTLS = filepath.Join(l.Data, "subscription.pem")
 	return l
 }
 
@@ -54,7 +56,8 @@ func Units(l Layout, s model.State) map[string][]byte {
 	}
 	routes := fmt.Sprintf("[Unit]\nDescription=Routes for multi IP proxy nodes\nWants=network-online.target\nAfter=network-online.target\nBefore=%s\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=%s routes up --state %s\nExecStop=%s routes down --state %s\nTimeoutStartSec=90\nTimeoutStopSec=90\nUMask=0077\n\n[Install]\nWantedBy=multi-user.target\n", ProxyService, quote(l.App), quote(l.State), quote(l.App), quote(l.State))
 	cover := fmt.Sprintf("[Unit]\nDescription=HTTP fallback for Trojan listener\nAfter=network.target\n\n[Service]\nType=simple\nExecStart=%s cover\nRestart=on-failure\nUMask=0077\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\nProtectSystem=strict\nCapabilityBoundingSet=\n\n[Install]\nWantedBy=multi-user.target\n", quote(l.App))
-	return map[string][]byte{ProxyService: []byte(proxy), RoutesService: []byte(routes), CoverService: []byte(cover)}
+	subscription := fmt.Sprintf("[Unit]\nDescription=Private HTTPS proxy subscriptions\nAfter=network-online.target %s\nRequires=%s\n\n[Service]\nType=simple\nExecStart=%s subscriptions serve\nRestart=on-failure\nRestartSec=3\nUMask=0077\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\nProtectSystem=strict\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE\n\n[Install]\nWantedBy=multi-user.target\n", ProxyService, ProxyService, quote(l.App))
+	return map[string][]byte{ProxyService: []byte(proxy), RoutesService: []byte(routes), CoverService: []byte(cover), SubscriptionService: []byte(subscription)}
 }
 
 type SavedFile struct {
@@ -75,7 +78,7 @@ type Backup struct {
 }
 
 func managedPaths(l Layout, s model.State) ([]string, error) {
-	paths := []string{l.State, l.Config, l.App, l.Latest, l.IPv6Config}
+	paths := []string{l.State, l.Config, l.App, l.Latest, l.IPv6Config, l.SubscriptionTLS}
 	for _, name := range Services {
 		paths = append(paths, filepath.Join(l.Units, name))
 	}
@@ -179,7 +182,7 @@ func readBackup(l Layout, path string) (Backup, error) {
 		return b, err
 	}
 	// Recovery must not depend on the current state or export manifest being valid.
-	allowed := []string{l.State, l.Config, l.App, l.Latest, l.IPv6Config}
+	allowed := []string{l.State, l.Config, l.App, l.Latest, l.IPv6Config, l.SubscriptionTLS}
 	for _, name := range Services {
 		allowed = append(allowed, filepath.Join(l.Units, name))
 	}
@@ -264,7 +267,7 @@ func restore(ctx context.Context, l Layout, r network.Runner, b Backup, current 
 			failures = append(failures, err.Error())
 		}
 	}
-	for _, name := range []string{RoutesService, CoverService, ProxyService} {
+	for _, name := range []string{RoutesService, CoverService, ProxyService, SubscriptionService} {
 		if b.Enabled[name] {
 			if _, err := r.Run(ctx, "systemctl", "enable", name); err != nil {
 				failures = append(failures, err.Error())
@@ -355,7 +358,7 @@ func apply(ctx context.Context, l Layout, r network.Runner, s model.State) (err 
 		return fmt.Errorf("旧状态无效，未覆盖：%w", e)
 	}
 	if old == nil {
-		for _, path := range []string{l.Config, l.IPv6Config, filepath.Join(l.Units, ProxyService), filepath.Join(l.Units, RoutesService), filepath.Join(l.Units, CoverService)} {
+		for _, path := range []string{l.Config, l.IPv6Config, l.SubscriptionTLS, filepath.Join(l.Units, ProxyService), filepath.Join(l.Units, RoutesService), filepath.Join(l.Units, CoverService), filepath.Join(l.Units, SubscriptionService)} {
 			if _, e := os.Lstat(path); e == nil {
 				return fmt.Errorf("发现同名配置但没有本工具状态，未覆盖：%s", path)
 			} else if !os.IsNotExist(e) {
@@ -377,6 +380,14 @@ func apply(ctx context.Context, l Layout, r network.Runner, s model.State) (err 
 	candidate, err := config.ServerWithACMEDirectory(s, l.ACME)
 	if err != nil {
 		return err
+	}
+	var subscriptionPEM []byte
+	if s.SubscriptionEnabled() && !s.AutomaticCertificate() {
+		certificate, key, err := config.Certificate(s)
+		if err != nil {
+			return err
+		}
+		subscriptionPEM = []byte(strings.Join(certificate, "") + "\n" + strings.Join(key, ""))
 	}
 	tmp, err := os.MkdirTemp(l.Data, "candidate-")
 	if err != nil {
@@ -459,6 +470,9 @@ func apply(ctx context.Context, l Layout, r network.Runner, s model.State) (err 
 	if err = store.Atomic(l.State, model.JSON(s), 0600); err != nil {
 		return err
 	}
+	if err = writeSubscriptionTLS(l, subscriptionPEM); err != nil {
+		return err
+	}
 	if err = store.Atomic(l.IPv6Config, []byte(ipv6SysctlConfig), 0644); err != nil {
 		return err
 	}
@@ -505,6 +519,29 @@ func apply(ctx context.Context, l Layout, r network.Runner, s model.State) (err 
 	}
 	if s.AutomaticCertificate() {
 		if err = waitCertificate(ctx, l, r, s.ServerName); err != nil {
+			return err
+		}
+	}
+	if s.SubscriptionEnabled() {
+		if _, err = r.Run(ctx, "systemctl", "enable", SubscriptionService); err != nil {
+			return err
+		}
+		if _, err = r.Run(ctx, "systemctl", "start", SubscriptionService); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+		if _, err = r.Run(ctx, "systemctl", "is-active", "--quiet", SubscriptionService); err != nil {
+			return fmt.Errorf("HTTPS 订阅服务启动失败，请检查 %s 和 TCP %d 是否占用：%w", SubscriptionService, s.SubscriptionPort, err)
+		}
+		if _, err = r.Run(ctx, l.App, "subscriptions", "check"); err != nil {
+			return err
+		}
+	} else {
+		if _, err = r.Run(ctx, "systemctl", "disable", SubscriptionService); err != nil {
 			return err
 		}
 	}

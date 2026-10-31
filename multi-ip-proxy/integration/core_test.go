@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	"mipproxy.local/mipproxy/internal/config"
 	"mipproxy.local/mipproxy/internal/export"
 	"mipproxy.local/mipproxy/internal/model"
@@ -134,6 +135,16 @@ func TestRealCoreTwoIPsTCPAndUDP(t *testing.T) {
 				s.Certificate = certPath
 				s.Key = keyPath
 			}
+			var printedWireGuard []map[string]any
+			if p.ID == "wireguard" {
+				printed, err := export.Console(s)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = yaml.Unmarshal([]byte(printed), &printedWireGuard); err != nil {
+					t.Fatal(err)
+				}
+			}
 			server, err := config.Server(s)
 			if err != nil {
 				t.Fatal(err)
@@ -234,12 +245,16 @@ func TestRealCoreTwoIPsTCPAndUDP(t *testing.T) {
 				proxies, listeners := []any{}, []any{}
 				for i, n := range s.Nodes {
 					p := export.MihomoNode(s, n)
+					if s.Protocol == "wireguard" {
+						p = printedWireGuard[i]
+						p["server"] = n.PublicIP // Isolated test address for the printed credentials.
+					}
 					if s.NeedsTLS() {
 						sum := sha256.Sum256(cert.Certificate[0])
 						p["fingerprint"] = hex.EncodeToString(sum[:])
 					}
 					proxies = append(proxies, p)
-					listeners = append(listeners, map[string]any{"name": fmt.Sprintf("probe-%d", i), "type": "mixed", "listen": "127.0.0.1", "port": base + 5 + i, "proxy": n.Name(s.Protocol)})
+					listeners = append(listeners, map[string]any{"name": fmt.Sprintf("probe-%d", i), "type": "mixed", "listen": "127.0.0.1", "port": base + 5 + i, "proxy": p["name"]})
 				}
 				startMihomo(t, mihomo, map[string]any{"log-level": "warning", "listeners": listeners, "proxies": proxies, "rules": []string{"MATCH,REJECT"}})
 				if e := network.WaitPort(ctx, net.JoinHostPort("127.0.0.1", strconv.Itoa(base+5))); e != nil {

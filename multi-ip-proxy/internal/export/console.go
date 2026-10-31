@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"gopkg.in/yaml.v3"
 	"mipproxy.local/mipproxy/internal/model"
 )
 
@@ -15,13 +16,21 @@ func Console(s model.State) (string, error) {
 	}
 	var output strings.Builder
 	if s.Protocol == "wireguard" {
-		files, err := Files(s)
-		if err != nil {
-			return "", err
-		}
 		for _, node := range s.Nodes {
-			name := node.Name(s.Protocol) + ".conf"
-			fmt.Fprintf(&output, "# %s\n%s\n", name, files[name])
+			fields := MihomoNode(s, node)
+			mapping := yaml.Node{Kind: yaml.MappingNode, Style: yaml.FlowStyle}
+			for _, name := range []string{"name", "server", "port", "type", "ip", "private-key", "public-key", "allowed-ips", "persistent-keepalive", "udp", "remote-dns-resolve", "dns", "mtu"} {
+				var value yaml.Node
+				if err := value.Encode(fields[name]); err != nil {
+					return "", err
+				}
+				mapping.Content = append(mapping.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name}, &value)
+			}
+			line, err := yaml.Marshal(&mapping)
+			if err != nil {
+				return "", err
+			}
+			fmt.Fprintf(&output, "- %s\n", strings.TrimSpace(string(line)))
 		}
 		return output.String(), nil
 	}

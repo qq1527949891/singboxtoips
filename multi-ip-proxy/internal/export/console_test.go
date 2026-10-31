@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
 	"mipproxy.local/mipproxy/internal/export"
 	"mipproxy.local/mipproxy/internal/model"
 	"mipproxy.local/mipproxy/internal/testutil"
@@ -30,8 +31,24 @@ func TestConsoleNodeFormatsAndMappedPorts(t *testing.T) {
 					t.Fatal("wrong requested SS console format")
 				}
 			case "wireguard":
-				if !strings.Contains(printed, "[Interface]") || !strings.Contains(printed, "Endpoint = "+first.PublicIP+":1081") || !strings.Contains(printed, first.ClientPrivateKey) {
-					t.Fatal("missing native WireGuard client configuration")
+				var proxies []map[string]any
+				if err := yaml.Unmarshal([]byte(printed), &proxies); err != nil {
+					t.Fatal("invalid Mihomo YAML", err)
+				}
+				if len(strings.Split(strings.TrimSpace(printed), "\n")) != len(s.Nodes) || len(proxies) != len(s.Nodes) {
+					t.Fatal("expected one WireGuard flow mapping per IP")
+				}
+				for i, proxy := range proxies {
+					node := s.Nodes[i]
+					if proxy["type"] != "wireguard" || proxy["server"] != node.PublicIP || proxy["private-key"] != node.ClientPrivateKey || proxy["public-key"] != model.WGKey(node.PublicKey) || proxy["ip"] != node.WGClientIP() || proxy["remote-dns-resolve"] != true {
+						t.Fatal("console fields differ from the actual client configuration")
+					}
+					if _, exists := proxy["pre-shared-key"]; exists {
+						t.Fatal("invented a preshared key not configured on the server")
+					}
+				}
+				if proxies[0]["port"] != 1081 || proxies[1]["port"] != s.ListenPort(s.Nodes[1]) {
+					t.Fatal("WireGuard mapped or allocated port was lost")
 				}
 			default:
 				prefix := s.Protocol + "://"

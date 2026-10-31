@@ -18,7 +18,17 @@ import (
 // private account and certificate keys. Verify issuance before exporting nodes:
 // ManageAsync alone only indicates that a background job has been scheduled.
 func issuedCertificate(directory, identity string, roots *x509.CertPool) (bool, error) {
+	path, err := issuedCertificatePath(directory, identity, roots)
+	return path != "", err
+}
+
+func issuedCertificatePath(directory, identity string, roots *x509.CertPool) (string, error) {
+	return cachedCertificatePath(directory, identity, roots, 5*time.Minute)
+}
+
+func cachedCertificatePath(directory, identity string, roots *x509.CertPool, minimumRemaining time.Duration) (string, error) {
 	ready := false
+	matchedPath := ""
 	err := filepath.WalkDir(directory, func(path string, entry fs.DirEntry, walkErr error) error {
 		if os.IsNotExist(walkErr) {
 			return nil
@@ -53,7 +63,7 @@ func issuedCertificate(directory, identity string, roots *x509.CertPool) (bool, 
 			}
 			chain = append(chain, certificate)
 		}
-		if len(chain) == 0 || chain[0].PublicKeyAlgorithm != x509.ECDSA || chain[0].NotAfter.Before(time.Now().Add(5*time.Minute)) {
+		if len(chain) == 0 || chain[0].PublicKeyAlgorithm != x509.ECDSA || chain[0].NotAfter.Before(time.Now().Add(minimumRemaining)) {
 			return nil
 		}
 		intermediates := x509.NewCertPool()
@@ -62,9 +72,12 @@ func issuedCertificate(directory, identity string, roots *x509.CertPool) (bool, 
 		}
 		_, err = chain[0].Verify(x509.VerifyOptions{DNSName: identity, Roots: roots, Intermediates: intermediates})
 		ready = err == nil
+		if ready {
+			matchedPath = path
+		}
 		return nil
 	})
-	return ready, err
+	return matchedPath, err
 }
 
 func waitCertificate(ctx context.Context, l Layout, runner network.Runner, identity string) error {

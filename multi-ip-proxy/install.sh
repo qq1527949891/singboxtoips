@@ -32,7 +32,7 @@ esac
 printf '%s\n' "$repository" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || fail "仓库格式应为 owner/repo。"
 if [ -n "$requested_version" ]; then
     case "$requested_version" in v*) ;; *) requested_version="v$requested_version" ;; esac
-    printf '%s\n' "$requested_version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' || fail "版本格式无效，例如 v0.1.3。"
+    printf '%s\n' "$requested_version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' || fail "版本格式无效，例如 v0.1.4。"
 fi
 
 if [ -z "$download_only" ]; then

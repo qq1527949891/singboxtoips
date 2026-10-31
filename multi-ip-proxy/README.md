@@ -44,7 +44,7 @@ sudo sh install.sh
 脚本自动识别 amd64/arm64，查询该仓库最新 Release。如果已安装相同版本，复用现有程序；否则下载对应的 `mip-proxy-linux-<架构>.tar.gz`，核对 Release 中 `SHA256SUMS` 后安装，再进入中文菜单。下载失败或校验不符会终止安装。脚本支持通过 `MIP_VERSION` 固定版本：
 
 ```sh
-sudo env MIP_VERSION=v0.1.3 sh install.sh
+sudo env MIP_VERSION=v0.1.4 sh install.sh
 sudo sh install.sh --no-menu
 sh install.sh --download-only ./packages
 ```
@@ -72,7 +72,7 @@ sudo ./mip-proxy
 1. 从按抗封锁需求排列的菜单选择**一个**协议。
 2. 自动读取网卡 IPv4 与路由，默认使用全部可用 IP；已有节点保留 ID 和凭据。
 3. 自动使用监听端口 443（已有部署保留原端口），按网卡/网关选择推荐策略路由。
-4. TLS 协议默认自动申请公网 IP 证书并自动续期，无需购买域名或填写 PEM 路径；已有手动证书继续使用。
+4. TLS 协议及 WireGuard 的 HTTPS 订阅默认自动申请公网 IP 证书并自动续期，无需购买域名或填写 PEM 路径；已有手动证书继续使用。
 5. 显示入口/出口摘要后部署。无法可靠判断的 NAT 入站映射、缺失网关等必要信息才会询问。
 
 不同 IP 可共用端口，各节点的入口和出站地址分别绑定。WireGuard 按节点 ID 分配不同 UDP 端口。443 是默认值，不能单靠端口保证抗封锁；已被其他服务占用时不会覆盖或停止该服务。
@@ -120,7 +120,7 @@ CSV 表头：`local_ip,public_ip,interface,gateway,prefix`。后 3 项仅在策�
 
 REALITY 不需要自有证书，需要服务器可访问的 TLS 握手目标；普通向导采用默认目标，SNI、握手目标可在 `--advanced` 中修改。默认目标只是起点，应检查其在目标服务器上的 TLS 兼容性和可达性。
 
-Trojan、VMess、Hysteria2 和 TUIC 使用 TLS 证书证明服务器身份；私钥由服务器保管。默认无需自有域名，工具选取一个节点公网 IPv4，通过 Let's Encrypt 自动申请受信任的 IP 证书。所有节点连接各自公网 IP，共用这一证书身份，客户端配置自动填写验证 IP；出站仍分别绑定各节点地址。
+Trojan、VMess、Hysteria2 和 TUIC 使用 TLS 证书证明服务器身份；WireGuard 协议自身不使用 TLS，HTTPS 订阅需要证书。私钥由服务器保管。默认无需自有域名，工具选取一个节点公网 IPv4，通过 Let's Encrypt 自动申请受信任的 IP 证书。所有节点连接各自公网 IP，共用这一证书身份，客户端配置自动填写验证 IP；出站仍分别绑定各节点地址。
 
 IP 证书使用 `shortlived` 配置，有效期约 6 天，由 sing-box 内置 ACME 管理器自动续期，无需安装 certbot、acme.sh 或设置额外定时任务。使用兼容 Hysteria2 的 P-256 密钥。依据：[Let's Encrypt IP 证书](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability)、[sing-box ACME](https://sing-box.sagernet.org/configuration/shared/certificate-provider/acme/)。
 
@@ -142,7 +142,9 @@ sudo mip-proxy apply --state /var/lib/mip-proxy/state.json
 
 ## 节点导出
 
-部署成功后，在控制台末尾直接打印全部节点，一行一个。VLESS、VMess、Trojan、Hysteria2、TUIC 使用标准分享链接；SOCKS5 为 `IP/端口/用户名/密码`，Shadowsocks（SS）为 `IP/端口/aes-256-gcm/密码`。这里的斜线格式用于控制台复制；订阅文件仍保留标准分享 URI。WireGuard 打印分节点的原生客户端配置。
+部署成功后直接打印全部节点，一行一个。VLESS、VMess、Trojan、Hysteria2、TUIC 使用标准分享链接；SOCKS5 为 `IP/端口/用户名/密码`，Shadowsocks（SS）为 `IP/端口/aes-256-gcm/密码`。这里的斜线格式用于控制台复制；订阅文件仍保留标准分享 URI。
+
+WireGuard 按 Mihomo/Clash 的单行 YAML 节点格式打印，每个 IP 一行，可放入支持 WireGuard 的 Mihomo 客户端配置的 `proxies:` 列表。字段包含实际公网 IP、分配或映射的端口、客户端私钥、服务端公钥、隧道 IP、IPv4 路由、保活间隔和 DNS。未配置预共享密钥时不输出 `pre-shared-key`；原生 `.conf` 仍单独导出。
 
 默认目录 `/var/lib/mip-proxy/export`，目录权限 0700，文件权限 0600：
 
@@ -158,7 +160,21 @@ sudo mip-proxy apply --state /var/lib/mip-proxy/state.json
 
 WireGuard 没有统一分享 URI，因此该协议不生成 `links.txt`、`subscription.txt`，使用 `.conf` 或 Mihomo/sing-box 配置导入。SOCKS5 的分享链接格式因客户端而异，可优先导入 YAML/JSON 或手动填写账号。更换协议时会移除本工具上次生成的旧导出文件，保留目录中的其他文件。
 
-仅导出节点和普通客户端配置，不配置具体游戏或接管客户机。没有自动公开的订阅 HTTP 服务；导出文件含凭据，请自行安全传输。客户端必须支持所选协议，不能让不支持协议的客户端通过格式转换获得支持。
+工具不配置具体游戏或接管客户机。客户端必须支持所选协议，不能让不支持协议的客户端通过格式转换获得支持。
+
+### HTTPS 订阅地址
+
+向导为 Trojan、Hysteria2、TUIC、WireGuard 自动启用 HTTPS 订阅，并在节点信息后直接打印地址。提供 Mihomo 完整配置、Mihomo proxy-provider 和 sing-box 配置；Trojan、Hysteria2、TUIC 另提供通用 URI/Base64 订阅，WireGuard 另提供每个 IP 的原生 `.conf` 下载地址。WireGuard 原生客户端使用配置文件导入，其自动刷新订阅能力取决于客户端。
+
+订阅绑定证书对应的本机 IPv4：UDP 协议优先使用 TCP 443，Trojan 优先使用 TCP 8443。首次配置会检查已存在的 TCP 监听，依次尝试推荐端口、8443、9443、18443；已有配置保留订阅端口。TCP 和 UDP 的同号端口可以同时使用，实际端口以控制台输出为准。防火墙、云安全组和 NAT 需要额外放行该 TCP 端口；自动 IP 证书仍需持续放行验证 IP 的 TCP 80。
+
+地址含随机 256 位令牌，须完整复制给客户端并妥善保管。服务仅生成客户端导出内容，不提供状态文件、备份或服务端私钥下载；HTTPS 自动加载续期证书。更新节点后同一订阅地址返回当前配置，默认保留令牌；更换为不支持订阅的协议时停止订阅服务。旧部署需重新运行向导以启用。
+
+重新查看已部署的订阅地址：
+
+```sh
+sudo mip-proxy subscriptions
+```
 
 重新运行向导、增删 IP 或整体更换协议后，已有 IP 的 ID 和凭据会保留。随机凭据独立生成；REALITY 私钥只保存在服务器状态/配置/备份中，不进入客户端导出。
 
@@ -189,6 +205,7 @@ sudo journalctl -u mip-proxy.service -n 100 --no-pager
 - `mip-proxy.service`：代理核心。
 - `mip-proxy-routes.service`：network-online 后恢复登记的精确策略路由，先于代理核心启动。
 - `mip-proxy-cover.service`：Trojan 使用的本机 HTTP 回落页，仅监听 `127.0.0.1:18080`。
+- `mip-proxy-subscription.service`：上述四种协议的带令牌 HTTPS 订阅，使用时才启用。
 
 配置 `/etc/mip-proxy/server.json`，状态/备份 `/var/lib/mip-proxy`，管理程序 `/usr/local/bin/mip-proxy`，独立核心 `/usr/local/lib/mip-proxy/sing-box`。开机路由恢复只使用状态，不访问原始证书文件。
 
@@ -213,7 +230,7 @@ python3 scripts/build.py
 sh scripts/verify-linux.sh
 ```
 
-验证脚本使用固定版本、固定 SHA256 的核心、Mihomo 和 Pebble，运行各协议转发、真实 HTTP-01/IP 证书签发和四种 TLS 协议客户端转发、完全禁用 IPv6 后的转发、策略路由、IPv6 禁用与恢复，以及自动安装/升级/校验失败测试。Pebble 仅作测试 CA，测试根证书只放入临时进程配置。
+验证脚本使用固定版本、固定 SHA256 的核心、Mihomo 和 Pebble，运行各协议转发、真实 HTTP-01/IP 证书签发和四种 TLS 协议客户端转发、WireGuard 订阅所需的独立证书申请、完全禁用 IPv6 后的转发、策略路由、IPv6 禁用与恢复、HTTPS 订阅访问/证书更新/只读服务环境，以及自动安装/升级/校验失败测试。WireGuard 的控制台单行输出会直接交给 Mihomo 验证 TCP/UDP 转发。Pebble 仅作测试 CA，测试根证书只放入临时进程配置。
 
 离线生成 8 份**独立的单协议**示例，并用固定版本核心检查各份服务端及客户端配置：
 

@@ -52,6 +52,19 @@ func TestAutomaticIPCertificateConstraints(t *testing.T) {
 	}
 }
 
+func TestWireGuardCanObtainCertificateForHTTPSSubscription(t *testing.T) {
+	s := testutil.State(t, "wireguard")
+	s.SubscriptionToken, _ = model.NewSubscriptionToken()
+	s.SubscriptionPort, s.CertificateMode, s.ServerName = 443, "acme-ip", s.Nodes[0].PublicIP
+	if err := s.Validate(); err != nil || !s.AutomaticCertificate() || s.NeedsTLS() {
+		t.Fatal("WireGuard subscription must obtain its own HTTPS certificate", err)
+	}
+	s.SubscriptionToken = "invalid"
+	if s.Validate() == nil {
+		t.Fatal("accepted an insecure subscription token")
+	}
+}
+
 func TestSecretsIndependentAndKeyIntegrity(t *testing.T) {
 	s := testutil.State(t, "reality")
 	if s.Nodes[0].UUID == s.Nodes[1].UUID || s.Nodes[0].Password == s.Nodes[1].Password || s.Nodes[0].PrivateKey == s.Nodes[1].PrivateKey {

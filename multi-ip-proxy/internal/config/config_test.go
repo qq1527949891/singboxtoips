@@ -87,6 +87,19 @@ func TestAutomaticCertificateUsesSharedProvider(t *testing.T) {
 	}
 }
 
+func TestWireGuardSubscriptionStartsACMEProvider(t *testing.T) {
+	s := testutil.State(t, "wireguard")
+	s.SubscriptionToken, _ = model.NewSubscriptionToken()
+	s.SubscriptionPort, s.CertificateMode, s.ServerName = 443, "acme-ip", s.Nodes[0].PublicIP
+	c, err := config.Server(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c["certificate_providers"].([]any)) != 1 || len(c["endpoints"].([]any)) != 2 {
+		t.Fatal("certificate provider was omitted for WireGuard HTTPS subscriptions")
+	}
+}
+
 func TestHysteria2RejectsIncompatibleEd25519Certificate(t *testing.T) {
 	s := testutil.State(t, "hysteria2")
 	public, private, err := ed25519.GenerateKey(rand.Reader)

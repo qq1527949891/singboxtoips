@@ -194,6 +194,8 @@ func MihomoNode(s model.State, n model.Node) object {
 		o["ip"] = n.WGClientIP()
 		o["allowed-ips"] = []string{"0.0.0.0/0"}
 		o["persistent-keepalive"] = 25
+		o["remote-dns-resolve"] = true
+		o["dns"] = []string{"1.1.1.1", "8.8.8.8"}
 		o["mtu"] = 1280
 	}
 	return o
@@ -243,7 +245,10 @@ func Files(s model.State) (map[string][]byte, error) {
 		clientOut = append(clientOut, outbounds...)
 	}
 	client := object{"log": object{"level": "warn"}, "dns": object{"strategy": "ipv4_only", "servers": []any{object{"type": "local", "tag": "local-dns"}}}, "inbounds": []any{object{"type": "mixed", "tag": "local", "listen": "127.0.0.1", "listen_port": 1080}}, "outbounds": clientOut, "endpoints": endpoints, "route": object{"rules": []any{object{"ip_version": 6, "action": "reject"}}, "final": "select", "default_domain_resolver": "local-dns"}}
-	readme := fmt.Sprintf("所选协议：%s\n节点数：%d（每个 IP 一个节点，全部使用同一种协议）\n\nlinks.txt：逐行分享链接\nsubscription.txt：Base64 分享链接集合；客户端须支持对应协议。\nmihomo.yaml：可导入的 Mihomo 配置，手动选择节点。\nmihomo-provider.yaml：Mihomo proxy-provider 内容。\nsing-box.json：可导入的 sing-box 客户端配置。\nnodes.csv：节点清单。\n\nTLS 校验保持开启；证书须受客户端信任。不会自动发布公网订阅服务。\n这些文件包含节点凭据，请妥善保存。\n", s.Protocol, len(s.Nodes))
+	readme := fmt.Sprintf("所选协议：%s\n节点数：%d（每个 IP 一个节点，全部使用同一种协议）\n\nlinks.txt：逐行分享链接\nsubscription.txt：Base64 分享链接集合；客户端须支持对应协议。\nmihomo.yaml：可导入的 Mihomo 配置，手动选择节点。\nmihomo-provider.yaml：Mihomo proxy-provider 内容。\nsing-box.json：可导入的 sing-box 客户端配置。\nnodes.csv：节点清单。\n\nTLS 校验保持开启；证书须受客户端信任。\n这些文件和订阅地址包含节点凭据，请妥善保存。\n", s.Protocol, len(s.Nodes))
+	for _, link := range Subscriptions(s) {
+		readme += fmt.Sprintf("%s：%s\n", link.Name, link.URL)
+	}
 	files := map[string][]byte{"links.txt": []byte(plain), "subscription.txt": []byte(base64.StdEncoding.EncodeToString([]byte(plain)) + "\n"), "mihomo.yaml": full, "mihomo-provider.yaml": provider, "sing-box.json": model.JSON(client), "nodes.csv": []byte(csvText.String()), "使用说明.txt": []byte(readme)}
 	if s.Protocol == "wireguard" {
 		delete(files, "links.txt")
