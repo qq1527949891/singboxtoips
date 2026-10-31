@@ -43,7 +43,7 @@ func FreeRange(count int) (int, error) {
 			return base, nil
 		}
 	}
-	return 0, fmt.Errorf("û���㹻�ı���̽��˿�")
+	return 0, fmt.Errorf("没有足够的本地探测端口")
 }
 
 type Result struct {
@@ -88,7 +88,7 @@ func Doctor(ctx context.Context, s model.State, binaryPath string, out io.Writer
 	if err = network.WaitPort(ctx, net.JoinHostPort("127.0.0.1", strconv.Itoa(base))); err != nil {
 		return err
 	}
-	fmt.Fprintln(out, "��鱾����ڵ���ʵ������֤��TCP ת���� UDP/STUN ���ڡ���")
+	fmt.Fprintln(out, "检查本机入口的真实代理认证、TCP 转发及 UDP/STUN 出口……")
 	results := make([]Result, len(s.Nodes))
 	limit := make(chan struct{}, 4)
 	var wg sync.WaitGroup
@@ -111,7 +111,7 @@ func Doctor(ctx context.Context, s model.State, binaryPath string, out io.Writer
 			if e != nil {
 				result.TCPError = e.Error()
 			} else if ip != n.PublicIP {
-				result.TCPError = "���ڲ�ƥ�䣺Ԥ�� " + n.PublicIP
+				result.TCPError = "出口不匹配：预期 " + n.PublicIP
 			}
 			for attempt := 0; attempt < 3; attempt++ {
 				if ctx.Err() != nil {
@@ -131,7 +131,7 @@ func Doctor(ctx context.Context, s model.State, binaryPath string, out io.Writer
 				result.UDPRTT /= time.Duration(result.UDPReceived)
 				result.UDPError = ""
 				if result.UDPIP != n.PublicIP {
-					result.UDPError = "���ڲ�ƥ�䣺Ԥ�� " + n.PublicIP
+					result.UDPError = "出口不匹配：预期 " + n.PublicIP
 				}
 			}
 			results[i] = result
@@ -143,23 +143,23 @@ func Doctor(ctx context.Context, s model.State, binaryPath string, out io.Writer
 	}
 	failed := false
 	for _, r := range results {
-		fmt.Fprintf(out, "%s\n  TCP ���ڣ�%s", r.Name, r.TCPIP)
+		fmt.Fprintf(out, "%s\n  TCP 出口：%s", r.Name, r.TCPIP)
 		if r.TCPError != "" {
-			fmt.Fprintf(out, "  δͨ����%s", r.TCPError)
+			fmt.Fprintf(out, "  未通过：%s", r.TCPError)
 			failed = true
 		}
 		fmt.Fprintln(out)
-		fmt.Fprintf(out, "  UDP ���ڣ�%s����Ӧ %d/3��ƽ������ %s", r.UDPIP, r.UDPReceived, r.UDPRTT.Round(time.Millisecond))
+		fmt.Fprintf(out, "  UDP 出口：%s，响应 %d/3，平均往返 %s", r.UDPIP, r.UDPReceived, r.UDPRTT.Round(time.Millisecond))
 		if r.UDPError != "" {
-			fmt.Fprintf(out, "  δͨ����%s", r.UDPError)
+			fmt.Fprintf(out, "  未通过：%s", r.UDPError)
 			failed = true
 		}
 		fmt.Fprintln(out)
 	}
-	fmt.Fprintln(out, "���ϴӷ��������������ⲿ��վ�ɴ����������֤������� RTT �������û����ڵ����Ϸ�ӳ١�")
-	fmt.Fprintln(out, "UDP δ��ӦҲ�����ǹ��� STUN ������������ƣ����� TCP ����ͷ�����־�жϡ�")
+	fmt.Fprintln(out, "以上从服务器本机发起。外部入站可达性须异机验证；这里的 RTT 不代表用户到节点的游戏延迟。")
+	fmt.Fprintln(out, "UDP 未响应也可能是公共 STUN 服务或上游限制；请结合 TCP 结果和服务日志判断。")
 	if failed {
-		return fmt.Errorf("���ּ��δͨ��")
+		return fmt.Errorf("部分检测未通过")
 	}
 	return nil
 }
@@ -183,7 +183,7 @@ func HTTPIP(ctx context.Context, port int) (string, error) {
 	}
 	ip, e := netip.ParseAddr(strings.TrimSpace(string(b)))
 	if e != nil || !ip.Is4() || resp.StatusCode != 200 {
-		return "", fmt.Errorf("����̽����񷵻���Ч���")
+		return "", fmt.Errorf("出口探测服务返回无效结果")
 	}
 	return ip.String(), nil
 }
@@ -213,7 +213,7 @@ func UDPExchangeContext(ctx context.Context, proxyPort int, host string, port in
 		return nil, err
 	}
 	if response[0] != 5 || response[1] != 0 {
-		return nil, fmt.Errorf("SOCKS5 ��֤Э��ʧ��")
+		return nil, fmt.Errorf("SOCKS5 认证协商失败")
 	}
 	if _, err = c.Write([]byte{5, 3, 0, 1, 0, 0, 0, 0, 0, 0}); err != nil {
 		return nil, err
@@ -223,7 +223,7 @@ func UDPExchangeContext(ctx context.Context, proxyPort int, host string, port in
 		return nil, err
 	}
 	if header[0] != 5 || header[1] != 0 {
-		return nil, fmt.Errorf("SOCKS5 UDP ASSOCIATE ���ܾ�")
+		return nil, fmt.Errorf("SOCKS5 UDP ASSOCIATE 被拒绝")
 	}
 	var addr string
 	switch header[3] {
@@ -250,7 +250,7 @@ func UDPExchangeContext(ctx context.Context, proxyPort int, host string, port in
 		}
 		addr = string(name)
 	default:
-		return nil, fmt.Errorf("SOCKS5 ��ַ������Ч")
+		return nil, fmt.Errorf("SOCKS5 地址类型无效")
 	}
 	p := make([]byte, 2)
 	if _, err = io.ReadFull(c, p); err != nil {
@@ -273,7 +273,7 @@ func UDPExchangeContext(ctx context.Context, proxyPort int, host string, port in
 	_ = udp.SetDeadline(time.Now().Add(4 * time.Second))
 	packet := []byte{0, 0, 0, 3, byte(len(host))}
 	if len(host) > 255 {
-		return nil, fmt.Errorf("Ŀ����������")
+		return nil, fmt.Errorf("目标域名过长")
 	}
 	packet = append(packet, host...)
 	packet = append(packet, byte(port>>8), byte(port))
@@ -291,7 +291,7 @@ func UDPExchangeContext(ctx context.Context, proxyPort int, host string, port in
 
 func UDPBody(packet []byte) ([]byte, error) {
 	if len(packet) < 4 || packet[0] != 0 || packet[1] != 0 || packet[2] != 0 {
-		return nil, fmt.Errorf("��Ч���Ƭ�� SOCKS5 UDP ��Ӧ")
+		return nil, fmt.Errorf("无效或分片的 SOCKS5 UDP 响应")
 	}
 	offset := 4
 	switch packet[3] {
@@ -305,7 +305,7 @@ func UDPBody(packet []byte) ([]byte, error) {
 		}
 		offset += 1 + int(packet[4])
 	default:
-		return nil, fmt.Errorf("δ֪ SOCKS5 ��ַ����")
+		return nil, fmt.Errorf("未知 SOCKS5 地址类型")
 	}
 	offset += 2
 	if len(packet) < offset {
@@ -334,7 +334,7 @@ func STUNContext(ctx context.Context, proxyPort int, host string, port int) (str
 
 func ParseSTUN(b, transaction []byte) (string, error) {
 	if len(b) < 20 || len(transaction) != 12 || binary.BigEndian.Uint16(b) != 0x0101 || binary.BigEndian.Uint32(b[4:]) != 0x2112a442 || string(b[8:20]) != string(transaction) {
-		return "", fmt.Errorf("STUN ��Ӧͷ������ ID ��Ч")
+		return "", fmt.Errorf("STUN 响应头或事务 ID 无效")
 	}
 	length := int(binary.BigEndian.Uint16(b[2:]))
 	if length+20 > len(b) {
@@ -354,5 +354,5 @@ func ParseSTUN(b, transaction []byte) (string, error) {
 		}
 		pos = start + (n+3)&^3
 	}
-	return "", fmt.Errorf("STUN ��Ӧû�� IPv4 XOR-MAPPED-ADDRESS")
+	return "", fmt.Errorf("STUN 响应没有 IPv4 XOR-MAPPED-ADDRESS")
 }

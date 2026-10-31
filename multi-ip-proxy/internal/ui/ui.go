@@ -29,9 +29,9 @@ func New(in io.Reader, out io.Writer) *UI {
 }
 func (u *UI) Ask(prompt, def string) (string, error) {
 	if def != "" {
-		fmt.Fprintf(u.Out, "%s [%s]��", prompt, def)
+		fmt.Fprintf(u.Out, "%s [%s]：", prompt, def)
 	} else {
-		fmt.Fprintf(u.Out, "%s��", prompt)
+		fmt.Fprintf(u.Out, "%s：", prompt)
 	}
 	type answer struct {
 		line string
@@ -66,7 +66,7 @@ func (u *UI) Number(prompt string, def, min, max int) (int, error) {
 		if e == nil && n >= min && n <= max {
 			return n, nil
 		}
-		fmt.Fprintf(u.Out, "������ %d�C%d ֮���һ�����֡�\n", min, max)
+		fmt.Fprintf(u.Out, "请输入 %d–%d 之间的一个数字。\n", min, max)
 	}
 }
 func (u *UI) Yes(prompt string, def bool) (bool, error) {
@@ -85,23 +85,23 @@ func (u *UI) Yes(prompt string, def bool) (bool, error) {
 		case "n", "no":
 			return false, nil
 		}
-		fmt.Fprintln(u.Out, "������ y �� n��")
+		fmt.Fprintln(u.Out, "请输入 y 或 n。")
 	}
 }
 
 func (u *UI) ChooseProtocol(current string) (string, error) {
-	fmt.Fprintln(u.Out, "\n�������������������еĲο��˵�")
-	fmt.Fprintln(u.Out, "���ݣ���������ʶ������̽��� UDP ���޳���������ʵ�������������")
-	fmt.Fprintln(u.Out, "IP ��������ʱ���л�Э�鲻�ܱ�֤�ָ�����Ϸ�������б�ע��")
+	fmt.Fprintln(u.Out, "\n按抗封锁需求优先排列的参考菜单")
+	fmt.Fprintln(u.Out, "依据：常见流量识别、主动探测和 UDP 受限场景；不是实测或永久排名。")
+	fmt.Fprintln(u.Out, "IP 本身被封时，切换协议不能保证恢复。游戏表现另行标注。")
 	fmt.Fprintln(u.Out)
 	def := 1
 	for i, p := range model.Protocols {
 		if p.ID == current {
 			def = i + 1
 		}
-		fmt.Fprintf(u.Out, "%d) %s\n   ��������%s\n   ��Ϸ��%s\n   ������%s\n\n", i+1, p.Name, p.Resistance, p.Gaming, p.Requirement)
+		fmt.Fprintf(u.Out, "%d) %s\n   抗封锁：%s\n   游戏：%s\n   条件：%s\n\n", i+1, p.Name, p.Resistance, p.Gaming, p.Requirement)
 	}
-	choice, err := u.Number("ֻѡ��һ��Э�飬���� IP �ڵ�ͳһʹ��", def, 1, len(model.Protocols))
+	choice, err := u.Number("只选择一种协议，所有 IP 节点统一使用", def, 1, len(model.Protocols))
 	if err != nil {
 		return "", err
 	}
@@ -109,7 +109,7 @@ func (u *UI) ChooseProtocol(current string) (string, error) {
 }
 
 func Selection(input string, count int) ([]int, error) {
-	if strings.EqualFold(input, "a") || input == "ȫ��" {
+	if strings.EqualFold(input, "a") || input == "全部" {
 		result := make([]int, count)
 		for i := range result {
 			result[i] = i
@@ -117,16 +117,16 @@ func Selection(input string, count int) ([]int, error) {
 		return result, nil
 	}
 	set := map[int]bool{}
-	fields := strings.FieldsFunc(input, func(r rune) bool { return r == ',' || r == ' ' || r == '��' })
+	fields := strings.FieldsFunc(input, func(r rune) bool { return r == ',' || r == ' ' || r == '，' })
 	for _, f := range fields {
 		n, e := strconv.Atoi(f)
 		if e != nil || n < 1 || n > count {
-			return nil, fmt.Errorf("IP �����Ч")
+			return nil, fmt.Errorf("IP 序号无效")
 		}
 		set[n-1] = true
 	}
 	if len(set) == 0 {
-		return nil, fmt.Errorf("����ѡ��һ�� IP")
+		return nil, fmt.Errorf("至少选择一个 IP")
 	}
 	result := []int{}
 	for i := range set {
@@ -157,7 +157,7 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		f.Close()
 	} else {
 		if runtime.GOOS != "linux" {
-			return s, fmt.Errorf("�Զ�̽������ Linux ���������У�������ͨ�� --inventory CSV Ԥ��")
+			return s, fmt.Errorf("自动探测需在 Linux 服务器运行；本机可通过 --inventory CSV 预览")
 		}
 		candidates, err = network.Discover(ctx, r)
 	}
@@ -165,19 +165,19 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		return s, err
 	}
 	if len(candidates) == 0 {
-		return s, fmt.Errorf("û�з��ֿ��õ�ַ����ʹ�� --inventory CSV ָ�������õĵ�ַ")
+		return s, fmt.Errorf("没有发现可用地址；可使用 --inventory CSV 指定已配置的地址")
 	}
-	fmt.Fprintln(u.Out, "\n������ַ��ѡ������̽��ֻ��ʾ���ڣ�NAT ��վӳ��������ƽ̨һ�£���")
+	fmt.Fprintln(u.Out, "\n本机地址候选（公网探测只表示出口，NAT 入站映射须与云平台一致）：")
 	for i, c := range candidates {
 		public := c.PublicIP
 		if public == "" {
-			public = "����д/̽��"
+			public = "待填写/探测"
 		}
-		fmt.Fprintf(u.Out, "%d) %s  ����=%s  ����=%s\n", i+1, c.LocalIP, c.Interface, public)
+		fmt.Fprintf(u.Out, "%d) %s  网卡=%s  公网=%s\n", i+1, c.LocalIP, c.Interface, public)
 	}
 	var chosen []int
 	for {
-		v, e := u.Ask("ѡ�� IP ��ţ����ŷָ���a ��ʾȫ��", "a")
+		v, e := u.Ask("选择 IP 序号，逗号分隔；a 表示全部", "a")
 		if e != nil {
 			return s, e
 		}
@@ -187,9 +187,9 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		}
 		fmt.Fprintln(u.Out, err)
 	}
-	portPrompt := "���нڵ�ı��������˿ڣ���ͬ IP �ɸ��ö˿ڣ�"
+	portPrompt := "所有节点的本机监听端口（不同 IP 可复用端口）"
 	if s.Protocol == "wireguard" {
-		portPrompt = "WireGuard ��ʼ UDP �˿ڣ����ڵ� ID ��������˿ڣ�"
+		portPrompt = "WireGuard 起始 UDP 端口（按节点 ID 分配独立端口）"
 	}
 	s.Port, err = u.Number(portPrompt, s.Port, 1, 65535)
 	if err != nil {
@@ -202,9 +202,9 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 	}
 	policy := s.Protocol == "wireguard"
 	if policy {
-		fmt.Fprintln(u.Out, "WireGuard �Զ����ø� IP �Ĳ���·�ɣ�ȷ�� UDP ���ֻذ�ʹ�ö�Ӧ IP����Ҫ���������������Ρ�")
+		fmt.Fprintln(u.Out, "WireGuard 自动启用各 IP 的策略路由，确保 UDP 握手回包使用对应 IP；需要网卡、网关与网段。")
 	} else {
-		policy, err = u.Yes("���ö�������·�ɣ�������/������ʱ�������ã�", len(pairs) > 1)
+		policy, err = u.Yes("启用独立策略路由（多网卡/多网关时建议启用）", len(pairs) > 1)
 		if err != nil {
 			return s, err
 		}
@@ -223,21 +223,21 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 	for _, idx := range chosen {
 		c := candidates[idx]
 		if c.PublicIP == "" {
-			fmt.Fprintf(u.Out, "̽�� %s �Ĺ������ڡ���\n", c.LocalIP)
+			fmt.Fprintf(u.Out, "探测 %s 的公网出口……\n", c.LocalIP)
 			c.PublicIP, _ = network.ProbePublicIP(ctx, c.LocalIP)
 		}
 		for {
-			pub, e := u.Ask("���� "+c.LocalIP+" ��Ӧ�Ĺ��� IPv4", c.PublicIP)
+			pub, e := u.Ask("本机 "+c.LocalIP+" 对应的公网 IPv4", c.PublicIP)
 			if e != nil {
 				return s, e
 			}
 			ip, e := netip.ParseAddr(pub)
 			if e != nil || !ip.Is4() || !ip.IsGlobalUnicast() || ip.IsPrivate() {
-				fmt.Fprintln(u.Out, "�����빫�� IPv4 ��ַ��")
+				fmt.Fprintln(u.Out, "请输入公网 IPv4 地址。")
 				continue
 			}
 			if publics[pub] {
-				fmt.Fprintln(u.Out, "�ù��� IP ��ʹ�á���˶�һ��һ NAT�����߲���Ѷ����ͬ����ð�䲻ͬ���� IP��")
+				fmt.Fprintln(u.Out, "该公网 IP 已使用。请核对一对一 NAT；工具不会把多个相同出口冒充不同公网 IP。")
 				continue
 			}
 			c.PublicIP = pub
@@ -265,19 +265,19 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		n.PolicyRouting = policy
 		if policy {
 			if n.Interface == "" {
-				n.Interface, err = u.Ask("��������"+n.LocalIP+"��", "")
+				n.Interface, err = u.Ask("网卡名（"+n.LocalIP+"）", "")
 				if err != nil {
 					return s, err
 				}
 			}
 			if n.Gateway == "" {
-				n.Gateway, err = u.Ask("�� IP ��Ĭ�����أ�"+n.LocalIP+"��", "")
+				n.Gateway, err = u.Ask("该 IP 的默认网关（"+n.LocalIP+"）", "")
 				if err != nil {
 					return s, err
 				}
 			}
 			if n.Prefix == "" {
-				n.Prefix, err = u.Ask("�������� CIDR��"+n.LocalIP+"��", "")
+				n.Prefix, err = u.Ask("本机网段 CIDR（"+n.LocalIP+"）", "")
 				if err != nil {
 					return s, err
 				}
@@ -286,15 +286,15 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		s.Nodes = append(s.Nodes, n)
 	}
 	if s.Protocol == "reality" {
-		s.ServerName, err = u.Ask("REALITY αװ����/SNI", s.ServerName)
+		s.ServerName, err = u.Ask("REALITY 伪装域名/SNI", s.ServerName)
 		if err != nil {
 			return s, err
 		}
-		s.RealityTarget, err = u.Ask("����Ŀ��������ͨ���� SNI ��ͬ��", s.ServerName)
+		s.RealityTarget, err = u.Ask("握手目标域名（通常与 SNI 相同）", s.ServerName)
 		if err != nil {
 			return s, err
 		}
-		s.RealityPort, err = u.Number("����Ŀ�� TLS �˿�", s.RealityPort, 1, 65535)
+		s.RealityPort, err = u.Number("握手目标 TLS 端口", s.RealityPort, 1, 65535)
 		if err != nil {
 			return s, err
 		}
@@ -304,11 +304,11 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		if def == "www.microsoft.com" {
 			def = ""
 		}
-		s.ServerName, err = u.Ask("�����֤������������нڵ㹲�� SNI��ʵ�����Ӹ��� IP��", def)
+		s.ServerName, err = u.Ask("你持有证书的域名（所有节点共用 SNI，实际连接各自 IP）", def)
 		if err != nil {
 			return s, err
 		}
-		s.Certificate, err = u.Ask("PEM ֤��/�������ļ�·��", s.Certificate)
+		s.Certificate, err = u.Ask("PEM 证书/完整链文件路径", s.Certificate)
 		if err != nil {
 			return s, err
 		}
@@ -316,7 +316,7 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		if err != nil {
 			return s, err
 		}
-		s.Key, err = u.Ask("PEM ˽Կ�ļ�·��", s.Key)
+		s.Key, err = u.Ask("PEM 私钥文件路径", s.Key)
 		if err != nil {
 			return s, err
 		}
@@ -329,7 +329,7 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		}
 	}
 	if s.Protocol == "hysteria2" {
-		enabled, e := u.Yes("���� Salamander �������ͻ�����֧�֣���ı� HTTP/3 ������ۣ�", s.ObfsPassword != "")
+		enabled, e := u.Yes("启用 Salamander 混淆（客户端须支持；会改变 HTTP/3 流量外观）", s.ObfsPassword != "")
 		if e != nil {
 			return s, e
 		}
@@ -355,9 +355,9 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 
 func (u *UI) Summary(s model.State) {
 	p, _ := model.Lookup(s.Protocol)
-	fmt.Fprintf(u.Out, "\nЭ�飺%s���ڵ㣺%d��ȫ��ʹ��ͬһЭ�飻�����˿ڣ�%d/%s\n", p.Name, len(s.Nodes), s.Port, s.Network())
-	fmt.Fprintln(u.Out, "ȫ���ڵ��ʹ�� IPv4����ʽ����������̨�������� IPv6��")
+	fmt.Fprintf(u.Out, "\n协议：%s；节点：%d；全部使用同一协议；本机端口：%d/%s\n", p.Name, len(s.Nodes), s.Port, s.Network())
+	fmt.Fprintln(u.Out, "全部节点仅使用 IPv4；正式部署会禁用整台服务器的 IPv6。")
 	for _, n := range s.Nodes {
-		fmt.Fprintf(u.Out, "  %s -> ���� %s:%d -> Ԥ�ڳ��� %s  ����·��=%t\n", s.Endpoint(n), n.LocalIP, s.ListenPort(n), n.PublicIP, n.PolicyRouting)
+		fmt.Fprintf(u.Out, "  %s -> 本机 %s:%d -> 预期出口 %s  策略路由=%t\n", s.Endpoint(n), n.LocalIP, s.ListenPort(n), n.PublicIP, n.PolicyRouting)
 	}
 }

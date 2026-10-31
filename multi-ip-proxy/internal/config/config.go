@@ -15,28 +15,28 @@ type Object = map[string]any
 func Certificate(s model.State) ([]string, []string, error) {
 	cert, err := os.ReadFile(s.Certificate)
 	if err != nil {
-		return nil, nil, fmt.Errorf("��ȡ֤�飺%w", err)
+		return nil, nil, fmt.Errorf("读取证书：%w", err)
 	}
 	key, err := os.ReadFile(s.Key)
 	if err != nil {
-		return nil, nil, fmt.Errorf("��ȡ֤��˽Կ��%w", err)
+		return nil, nil, fmt.Errorf("读取证书私钥：%w", err)
 	}
 	pair, err := tls.X509KeyPair(cert, key)
 	if err != nil {
-		return nil, nil, fmt.Errorf("֤����˽Կ��ƥ�䣺%w", err)
+		return nil, nil, fmt.Errorf("证书与私钥不匹配：%w", err)
 	}
 	leaf, err := x509.ParseCertificate(pair.Certificate[0])
 	if err != nil {
 		return nil, nil, err
 	}
 	if time.Now().Before(leaf.NotBefore) || time.Now().After(leaf.NotAfter) {
-		return nil, nil, fmt.Errorf("֤��δ��Ч���ѹ���")
+		return nil, nil, fmt.Errorf("证书未生效或已过期")
 	}
 	if err = leaf.VerifyHostname(s.ServerName); err != nil {
-		return nil, nil, fmt.Errorf("֤�鲻ƥ������ %s��%w", s.ServerName, err)
+		return nil, nil, fmt.Errorf("证书不匹配域名 %s：%w", s.ServerName, err)
 	}
 	if s.Protocol == "hysteria2" && leaf.PublicKeyAlgorithm == x509.Ed25519 {
-		return nil, nil, fmt.Errorf("Hysteria2 �� Chrome ����ģ�ⲻ���� Ed25519 ֤�飬��ʹ�� ECDSA �� RSA ֤��")
+		return nil, nil, fmt.Errorf("Hysteria2 的 Chrome 握手模拟不兼容 Ed25519 证书，请使用 ECDSA 或 RSA 证书")
 	}
 	return []string{string(cert)}, []string{string(key)}, nil
 }

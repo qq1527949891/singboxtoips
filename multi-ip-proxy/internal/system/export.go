@@ -24,7 +24,7 @@ func managedRead(l Layout, state, output string, read func() error) error {
 		}
 		defer unlock()
 		if _, err = os.Stat(l.Pending); err == nil {
-			return fmt.Errorf("�ϴβ�����δ��ɣ����� apply �� rollback �ָ����ٵ���/���")
+			return fmt.Errorf("上次部署尚未完成，请先 apply 或 rollback 恢复后再导出/检测")
 		} else if !os.IsNotExist(err) {
 			return err
 		}

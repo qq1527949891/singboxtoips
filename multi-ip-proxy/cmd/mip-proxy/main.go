@@ -36,7 +36,7 @@ func main() {
 	go func() { <-ctx.Done(); cancel() }()
 	if err := run(ctx, os.Args[1:]); err != nil {
 		if err != io.EOF {
-			fmt.Fprintln(os.Stderr, "����", err)
+			fmt.Fprintln(os.Stderr, "错误：", err)
 			os.Exit(1)
 		}
 	}
@@ -44,10 +44,10 @@ func main() {
 
 func requireLinux() error {
 	if runtime.GOOS != "linux" {
-		return fmt.Errorf("����/·�ɹ�����֧�� Linux������������Ԥ���Ϳͻ�������")
+		return fmt.Errorf("部署/路由管理仅支持 Linux；本机可生成预览和客户端配置")
 	}
 	if os.Geteuid() != 0 {
-		return fmt.Errorf("����/·�ɹ�����Ҫ root����ʹ�� sudo")
+		return fmt.Errorf("部署/路由管理需要 root，请使用 sudo")
 	}
 	return nil
 }
@@ -58,7 +58,7 @@ func ensureCore(ctx context.Context, path string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	fmt.Printf("���ز�У��ٷ� sing-box %s����\n", model.CoreVersion)
+	fmt.Printf("下载并校验官方 sing-box %s……\n", model.CoreVersion)
 	return core.Install(ctx, path)
 }
 
@@ -79,9 +79,9 @@ func run(ctx context.Context, args []string) error {
 		fmt.Printf("mip-proxy 0.1.1 / sing-box %s\n", model.CoreVersion)
 		return nil
 	case "wizard":
-		inventory := fs.String("inventory", "", "����/���� IP ӳ�� CSV")
-		out := fs.String("out", "", "������Ԥ��Ŀ¼")
-		apply := fs.Bool("apply", false, "���ɺ��𵽱��� Linux")
+		inventory := fs.String("inventory", "", "本机/公网 IP 映射 CSV")
+		out := fs.String("out", "", "仅生成预览目录")
+		apply := fs.Bool("apply", false, "生成后部署到本机 Linux")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -102,17 +102,17 @@ func run(ctx context.Context, args []string) error {
 			if err = store.Bundle(s, *out); err != nil {
 				return err
 			}
-			fmt.Println("Ԥ�����ڵ����ã�", *out)
+			fmt.Println("预览及节点配置：", *out)
 		}
 		deploy := *apply
 		if !deploy && *out == "" {
-			answer, e := terminal.Number("1 ���𵽱�����2 ����������", 1, 1, 2)
+			answer, e := terminal.Number("1 部署到本机；2 仅生成配置", 1, 1, 2)
 			if e != nil {
 				return e
 			}
 			deploy = answer == 1
 			if !deploy {
-				path, e := terminal.Ask("���Ŀ¼", "mip-proxy-output")
+				path, e := terminal.Ask("输出目录", "mip-proxy-output")
 				if e != nil {
 					return e
 				}
@@ -133,13 +133,13 @@ func run(ctx context.Context, args []string) error {
 		}
 		return nil
 	case "generate":
-		state := fs.String("state", "", "״̬�ļ�")
-		out := fs.String("out", "mip-proxy-output", "���Ŀ¼")
+		state := fs.String("state", "", "状态文件")
+		out := fs.String("out", "mip-proxy-output", "输出目录")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		if *state == "" {
-			return fmt.Errorf("��Ҫ --state")
+			return fmt.Errorf("需要 --state")
 		}
 		s, err := model.Load(*state)
 		if err != nil {
@@ -147,7 +147,7 @@ func run(ctx context.Context, args []string) error {
 		}
 		return store.Bundle(s, *out)
 	case "apply":
-		state := fs.String("state", l.State, "״̬�ļ�")
+		state := fs.String("state", l.State, "状态文件")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -167,15 +167,15 @@ func run(ctx context.Context, args []string) error {
 		installed(terminal, l, s)
 		return nil
 	case "export":
-		state := fs.String("state", l.State, "״̬�ļ�")
-		out := fs.String("out", l.Exports, "����Ŀ¼")
+		state := fs.String("state", l.State, "状态文件")
+		out := fs.String("out", l.Exports, "导出目录")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		if err := system.Export(l, *state, *out); err != nil {
 			return err
 		}
-		fmt.Println("�ڵ��ѵ�����", *out)
+		fmt.Println("节点已导出：", *out)
 		return nil
 	case "status":
 		s, err := model.Load(l.State)
@@ -187,8 +187,8 @@ func run(ctx context.Context, args []string) error {
 		fmt.Print(string(b))
 		return e
 	case "doctor":
-		state := fs.String("state", l.State, "״̬�ļ�")
-		binary := fs.String("core", l.Core, "sing-box ·��")
+		state := fs.String("state", l.State, "状态文件")
+		binary := fs.String("core", l.Core, "sing-box 路径")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -198,7 +198,7 @@ func run(ctx context.Context, args []string) error {
 		if runtime.GOOS == "windows" {
 			def += ".exe"
 		}
-		output := fs.String("out", def, "���ı���·��")
+		output := fs.String("out", def, "核心保存路径")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -209,9 +209,9 @@ func run(ctx context.Context, args []string) error {
 		return ensureCore(ctx, path)
 	case "routes":
 		if len(args) < 2 || (args[1] != "up" && args[1] != "down") {
-			return fmt.Errorf("�÷���routes up|down --state FILE")
+			return fmt.Errorf("用法：routes up|down --state FILE")
 		}
-		state := fs.String("state", l.State, "״̬�ļ�")
+		state := fs.String("state", l.State, "状态文件")
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
@@ -228,7 +228,7 @@ func run(ctx context.Context, args []string) error {
 		return network.Down(ctx, r, s)
 	case "ipv6":
 		if len(args) != 2 || args[1] != "disable" {
-			return fmt.Errorf("�÷���ipv6 disable")
+			return fmt.Errorf("用法：ipv6 disable")
 		}
 		if err := requireLinux(); err != nil {
 			return err
@@ -252,8 +252,8 @@ func run(ctx context.Context, args []string) error {
 		}
 		return err
 	case "demo":
-		protocol := fs.String("protocol", "reality", "Э�� ID �� all��������ʾ����")
-		out := fs.String("out", "demo", "���Ŀ¼")
+		protocol := fs.String("protocol", "reality", "协议 ID 或 all（仅离线示例）")
+		out := fs.String("out", "demo", "输出目录")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -267,28 +267,28 @@ func run(ctx context.Context, args []string) error {
 		}
 		return demo(*protocol, *out)
 	default:
-		return fmt.Errorf("δ֪���� %q������ mip-proxy help", args[0])
+		return fmt.Errorf("未知命令 %q；运行 mip-proxy help", args[0])
 	}
 }
 
 func installed(t *ui.UI, l system.Layout, s model.State) {
 	t.Summary(s)
-	fmt.Println("�����������ÿ����ָ����ڵ��ļ���", l.Exports)
-	fmt.Println("������ IPv6 �ѽ��ò��־û���ȫ���ڵ��ʹ�� IPv4��")
+	fmt.Println("已启动并设置开机恢复。节点文件：", l.Exports)
+	fmt.Println("服务器 IPv6 已禁用并持久化，全部节点仅使用 IPv4。")
 	if s.Protocol == "wireguard" {
-		fmt.Println("�����ư�ȫ�顢����ǽ�� NAT ����ժҪ���еĸ��ڵ� UDP �˿ڡ�")
+		fmt.Println("请在云安全组、防火墙和 NAT 放行摘要所列的各节点 UDP 端口。")
 	} else if s.Protocol == "socks5" {
-		fmt.Printf("SOCKS5������ %d/TCP��UDP �м����ö�̬�˿ڣ��谴�ͻ�����Դ���в����� NAT�����ʹ��˵����\n", s.Port)
+		fmt.Printf("SOCKS5：放行 %d/TCP；UDP 中继另用动态端口，需按客户端来源放行并配置 NAT，详见使用说明。\n", s.Port)
 	} else {
-		fmt.Printf("�ⲿ���ӻ���Ҫ�ư�ȫ�顢��������ǽ�� NAT ���� %d/%s������δ��ջ��滻���з���ǽ��\n", s.Port, s.Network())
+		fmt.Printf("外部连接还需要云安全组、主机防火墙和 NAT 放行 %d/%s。工具未清空或替换现有防火墙。\n", s.Port, s.Network())
 	}
-	fmt.Println("���� mip-proxy doctor �����֤��ת����ʵ�ʹ������ڡ�")
+	fmt.Println("运行 mip-proxy doctor 检查认证、转发和实际公网出口。")
 }
 
 func menu(ctx context.Context, t *ui.UI, l system.Layout, r network.Runner) error {
 	for {
-		fmt.Println("\n�� IP �����ڵ㹤��\n1) ����/���½ڵ㣨����ѡ��һ��Э�飩\n2) �鿴״̬\n3) �����ڵ�\n4) ���ڵ�\n5) �ع��ϴβ���\n0) �˳�")
-		choice, err := t.Number("ѡ��", 1, 0, 5)
+		fmt.Println("\n多 IP 代理节点工具\n1) 创建/更新节点（交互选择一种协议）\n2) 查看状态\n3) 导出节点\n4) 检测节点\n5) 回滚上次部署\n0) 退出")
+		choice, err := t.Number("选择", 1, 0, 5)
 		if err != nil {
 			return err
 		}
@@ -306,7 +306,7 @@ func menu(ctx context.Context, t *ui.UI, l system.Layout, r network.Runner) erro
 				s, err = t.Wizard(ctx, r, "", old)
 				if err == nil {
 					var action int
-					action, err = t.Number("1 Ӧ���������ã�2 ������Ԥ��", 1, 1, 2)
+					action, err = t.Number("1 应用以上配置；2 仅导出预览", 1, 1, 2)
 					if err == nil {
 						if action == 1 {
 							err = ensureCore(ctx, l.Core)
@@ -318,7 +318,7 @@ func menu(ctx context.Context, t *ui.UI, l system.Layout, r network.Runner) erro
 							}
 						} else {
 							var path string
-							path, err = t.Ask("Ԥ��Ŀ¼", "mip-proxy-output")
+							path, err = t.Ask("预览目录", "mip-proxy-output")
 							if err == nil {
 								err = store.Bundle(s, path)
 							}
@@ -339,15 +339,15 @@ func menu(ctx context.Context, t *ui.UI, l system.Layout, r network.Runner) erro
 			if err == io.EOF || errors.Is(err, context.Canceled) {
 				return err
 			}
-			fmt.Fprintln(t.Out, "����ʧ�ܣ�", err)
+			fmt.Fprintln(t.Out, "操作失败：", err)
 		}
 	}
 }
 
 func help() {
-	fmt.Println(`mip-proxy��Linux �� IP ��Э������ڵ㹤��
+	fmt.Println(`mip-proxy：Linux 多 IP 单协议代理节点工具
 
-�޲������У����Ľ����˵���Э�鰴����������ο�����
+无参数运行：中文交互菜单，协议按抗封锁需求参考排序。
 
   wizard [--inventory ip-map.csv] [--out preview] [--apply]
   generate --state state.json --out bundle
@@ -360,16 +360,16 @@ func help() {
   core --out /path/to/sing-box
   demo --protocol reality|trojan|hysteria2|vmess|tuic|shadowsocks|wireguard|socks5|all --out demo
 
-������ʵ�ڵ�ͳһʹ��һ��Э�飻����Э��ʱ�����滻��
-�Զ�̽��/����֧�� Linux IPv4��systemd��amd64/arm64��
-�����������ӡ�Base64 ���Ӽ��ϡ�Mihomo YAML��sing-box JSON��WireGuard ���� .conf��
-Ԥ�����޸�ϵͳ����/·�ɡ�TLS Э����Ҫ�ͻ������ε�����֤�顣
-�������ο�˳�򲻴����κ������µ�ʵ��������`)
+所有真实节点统一使用一种协议；更换协议时整体替换。
+自动探测/部署支持 Linux IPv4、systemd，amd64/arm64。
+导出分享链接、Base64 链接集合、Mihomo YAML、sing-box JSON；WireGuard 导出 .conf。
+预览不修改系统服务/路由。TLS 协议需要客户端信任的域名证书。
+抗封锁参考顺序不代表任何网络下的实测排名。`)
 }
 
 func demo(protocol, dir string) error {
 	if _, ok := model.Lookup(protocol); !ok {
-		return fmt.Errorf("��ЧЭ��")
+		return fmt.Errorf("无效协议")
 	}
 	if err := store.OwnDirectory(dir); err != nil {
 		return err
@@ -422,6 +422,6 @@ func demo(protocol, dir string) error {
 	if err = store.Bundle(s, dir); err != nil {
 		return err
 	}
-	fmt.Println("����������ʾ�����ĵ����� IP/������ǩ֤�飬����ֱ�Ӳ��𣩣�", dir)
+	fmt.Println("已生成离线示例（文档保留 IP/短期自签证书，不能直接部署）：", dir)
 	return nil
 }

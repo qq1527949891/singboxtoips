@@ -33,7 +33,7 @@ func (ExecRunner) RunInput(ctx context.Context, input []byte, args ...string) ([
 
 func runCommand(ctx context.Context, input []byte, args ...string) ([]byte, error) {
 	if len(args) == 0 {
-		return nil, fmt.Errorf("ȱ������")
+		return nil, fmt.Errorf("缺少命令")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -57,7 +57,7 @@ func runCommand(ctx context.Context, input []byte, args ...string) ([]byte, erro
 	}
 	b, err := cmd.CombinedOutput()
 	if err != nil {
-		return b, fmt.Errorf("%s��%w��%s", args[0], err, strings.TrimSpace(string(b)))
+		return b, fmt.Errorf("%s：%w：%s", args[0], err, strings.TrimSpace(string(b)))
 	}
 	return b, nil
 }
@@ -183,7 +183,7 @@ func ProbePublicIP(ctx context.Context, source string) (string, error) {
 		if readErr == nil && resp.StatusCode == 200 && parseErr == nil && ip.Is4() && ip.IsGlobalUnicast() && !ip.IsPrivate() {
 			return ip.String(), nil
 		}
-		last = fmt.Errorf("����̽�ⷵ����Ч���")
+		last = fmt.Errorf("公网探测返回无效结果")
 	}
 	return "", last
 }
@@ -195,7 +195,7 @@ func ReadCSV(r io.Reader) ([]Candidate, error) {
 		return nil, err
 	}
 	if len(rows) < 2 {
-		return nil, fmt.Errorf("CSV ���ٰ�����ͷ��һ�е�ַ")
+		return nil, fmt.Errorf("CSV 至少包含表头和一行地址")
 	}
 	columns := map[string]int{}
 	for i, k := range rows[0] {
@@ -203,7 +203,7 @@ func ReadCSV(r io.Reader) ([]Candidate, error) {
 	}
 	for _, k := range []string{"local_ip", "public_ip"} {
 		if _, ok := columns[k]; !ok {
-			return nil, fmt.Errorf("CSV ȱ�� %s", k)
+			return nil, fmt.Errorf("CSV 缺少 %s", k)
 		}
 	}
 	result := []Candidate{}
@@ -218,7 +218,7 @@ func ReadCSV(r io.Reader) ([]Candidate, error) {
 		for _, s := range []string{c.LocalIP, c.PublicIP} {
 			a, e := netip.ParseAddr(s)
 			if e != nil || !a.Is4() || !a.IsGlobalUnicast() {
-				return nil, fmt.Errorf("CSV �� %d �е�ַ��Ч��%q", line+2, s)
+				return nil, fmt.Errorf("CSV 第 %d 行地址无效：%q", line+2, s)
 			}
 		}
 		result = append(result, c)
@@ -245,7 +245,7 @@ func VerifyLocal(ctx context.Context, r Runner, s model.State) error {
 			}
 		}
 		if !found {
-			return fmt.Errorf("����û�е�ַ %s������ %s������������ƽ̨��ϵͳ����ȷ���õ�ַ", n.LocalIP, n.Interface)
+			return fmt.Errorf("本机没有地址 %s（网卡 %s）；请先在云平台和系统中正确配置地址", n.LocalIP, n.Interface)
 		}
 	}
 	return nil
@@ -265,7 +265,7 @@ func WaitPort(ctx context.Context, address string) error {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("�ȴ����ش����˿� %s ��ʱ", address)
+	return fmt.Errorf("等待本地代理端口 %s 超时", address)
 }
 
 func intValue(v any) int {

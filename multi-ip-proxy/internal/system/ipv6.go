@@ -40,7 +40,7 @@ func ipv6Values(l Layout) (map[string]string, error) {
 func validateIPv6Values(values map[string]string) error {
 	for name, value := range values {
 		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\\x00\r\n") || (value != "0" && value != "1") {
-			return fmt.Errorf("IPv6 �ָ���¼������Ч�ӿڻ򿪹�ֵ")
+			return fmt.Errorf("IPv6 恢复记录包含无效接口或开关值")
 		}
 	}
 	return nil
@@ -65,14 +65,14 @@ func DisableIPv6(ctx context.Context, l Layout, r network.Runner) error {
 		return nil
 	}
 	if _, err = r.Run(ctx, "sysctl", "-w", "net/ipv6/conf/all/disable_ipv6=1", "net/ipv6/conf/default/disable_ipv6=1"); err != nil {
-		return fmt.Errorf("���÷����� IPv6��%w", err)
+		return fmt.Errorf("禁用服务器 IPv6：%w", err)
 	}
 	values, err = ipv6Values(l)
 	if err != nil {
 		return err
 	}
 	if ipv6Enabled(values) {
-		return fmt.Errorf("�������������� IPv6 �Ľӿڣ�����δ���")
+		return fmt.Errorf("服务器仍有启用 IPv6 的接口，部署未完成")
 	}
 	return nil
 }
@@ -100,7 +100,7 @@ func restoreIPv6(ctx context.Context, l Layout, r network.Runner, b Backup) erro
 			continue
 		}
 		if _, err = r.Run(ctx, "sysctl", "-w", "net/ipv6/conf/"+name+"/disable_ipv6="+value); err != nil {
-			return fmt.Errorf("�ָ� IPv6 ���أ�%w", err)
+			return fmt.Errorf("恢复 IPv6 开关：%w", err)
 		}
 		current, err = ipv6Values(l)
 		if err != nil {
@@ -118,10 +118,10 @@ func restoreIPv6(ctx context.Context, l Layout, r network.Runner, b Backup) erro
 			continue
 		}
 		if !ok {
-			return fmt.Errorf("��ǰִ������֧�ָֻ� IPv6 ��ַ/·��")
+			return fmt.Errorf("当前执行器不支持恢复 IPv6 地址/路由")
 		}
 		if _, err = inputRunner.RunInput(ctx, saved.data, "ip", "-6", saved.kind, "restore"); err != nil {
-			return fmt.Errorf("�ָ� IPv6 %s��%w", saved.kind, err)
+			return fmt.Errorf("恢复 IPv6 %s：%w", saved.kind, err)
 		}
 	}
 	return nil

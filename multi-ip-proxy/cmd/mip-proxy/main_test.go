@@ -16,7 +16,7 @@ func TestEmptyStateFileReportsCLIError(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestEmptyStateCLIHelper$")
 	cmd.Env = append(os.Environ(), "MIP_EMPTY_STATE_HELPER="+path)
 	b, err := cmd.CombinedOutput()
-	if err == nil || !strings.Contains(string(b), "��ȡ״̬") {
+	if err == nil || !strings.Contains(string(b), "读取状态") {
 		t.Fatalf("invalid state was silently accepted: %v; %s", err, b)
 	}
 }

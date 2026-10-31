@@ -100,7 +100,7 @@ func TestWireGuardProbeHasIndependentPeer(t *testing.T) {
 func TestCredentialEscaping(t *testing.T) {
 	for _, protocol := range []string{"hysteria2", "trojan", "tuic", "shadowsocks"} {
 		s := testutil.State(t, protocol)
-		s.Nodes[0].Password = "a:/@?#%&+����-password"
+		s.Nodes[0].Password = "a:/@?#%&+中文-password"
 		u, err := url.Parse(export.URI(s, s.Nodes[0]))
 		if err != nil {
 			t.Fatal(err)

@@ -133,7 +133,7 @@ func TestApplyFileRecoversBeforeLoadingBrokenState(t *testing.T) {
 	}
 	r := runner()
 	r.failCheck = true // Stop after recovery, before attempting a new deployment.
-	if err = ApplyFile(context.Background(), l, r, l.State); err == nil || !strings.Contains(err.Error(), "�������ü��ʧ��") {
+	if err = ApplyFile(context.Background(), l, r, l.State); err == nil || !strings.Contains(err.Error(), "核心配置检查失败") {
 		t.Fatal("failed to reach configuration validation after recovery", err)
 	}
 	if _, err = model.Load(l.State); err != nil {

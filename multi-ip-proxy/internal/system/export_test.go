@@ -22,7 +22,7 @@ func TestManagedReadersRejectUnfinishedDeployment(t *testing.T) {
 		"doctor": func() error { return Doctor(context.Background(), l, l.State, "unused", io.Discard) },
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := read(); err == nil || !strings.Contains(err.Error(), "�ϴβ�����δ���") {
+			if err := read(); err == nil || !strings.Contains(err.Error(), "上次部署尚未完成") {
 				t.Fatalf("read partial managed state: %v", err)
 			}
 		})

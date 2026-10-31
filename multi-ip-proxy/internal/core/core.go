@@ -30,7 +30,7 @@ var Digests = map[string]string{
 func Install(ctx context.Context, dest string) error {
 	digest, ok := Digests[runtime.GOOS+"/"+runtime.GOARCH]
 	if !ok {
-		return fmt.Errorf("��֧�ִ�ƽ̨��֧�� Linux amd64/arm64")
+		return fmt.Errorf("不支持此平台；支持 Linux amd64/arm64")
 	}
 	ext := "tar.gz"
 	if runtime.GOOS == "windows" {
@@ -49,7 +49,7 @@ func Install(ctx context.Context, dest string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("��������ʧ�ܣ�HTTP %d", resp.StatusCode)
+		return fmt.Errorf("核心下载失败：HTTP %d", resp.StatusCode)
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 256<<20))
 	if err != nil {
@@ -57,7 +57,7 @@ func Install(ctx context.Context, dest string) error {
 	}
 	hash := sha256.Sum256(b)
 	if hex.EncodeToString(hash[:]) != digest {
-		return fmt.Errorf("���� SHA256 У��ʧ�ܣ�δ��װ")
+		return fmt.Errorf("核心 SHA256 校验失败，未安装")
 	}
 	binaryName := "sing-box"
 	if runtime.GOOS == "windows" {
@@ -108,7 +108,7 @@ func Install(ctx context.Context, dest string) error {
 		}
 	}
 	if len(payload) == 0 {
-		return fmt.Errorf("ѹ����û�к��Ŀ�ִ���ļ�")
+		return fmt.Errorf("压缩包没有核心可执行文件")
 	}
 	if err = os.MkdirAll(filepath.Dir(dest), 0700); err != nil {
 		return err
@@ -141,7 +141,7 @@ func Version(ctx context.Context, r network.Runner, path string) error {
 		return err
 	}
 	if !strings.HasPrefix(string(b), "sing-box version "+model.CoreVersion+"\n") && !strings.HasPrefix(string(b), "sing-box version "+model.CoreVersion+"\r\n") {
-		return fmt.Errorf("��Ҫ sing-box %s�����ֲ����ݰ汾", model.CoreVersion)
+		return fmt.Errorf("需要 sing-box %s，发现不兼容版本", model.CoreVersion)
 	}
 	return nil
 }

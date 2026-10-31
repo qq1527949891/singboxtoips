@@ -76,7 +76,7 @@ func IsExportName(name string) bool {
 	if filepath.Base(name) != name || strings.ContainsAny(name, "/\\") {
 		return false
 	}
-	for _, fixed := range []string{"links.txt", "subscription.txt", "mihomo.yaml", "mihomo-provider.yaml", "sing-box.json", "nodes.csv", "ʹ��˵��.txt", ".mip-proxy", ".export-manifest.json"} {
+	for _, fixed := range []string{"links.txt", "subscription.txt", "mihomo.yaml", "mihomo-provider.yaml", "sing-box.json", "nodes.csv", "使用说明.txt", ".mip-proxy", ".export-manifest.json"} {
 		if name == fixed {
 			return true
 		}
@@ -102,7 +102,7 @@ func ExportNames(dir string) ([]string, error) {
 	}
 	for _, name := range names {
 		if !IsExportName(name) {
-			return nil, fmt.Errorf("�����嵥�������ܹ������ļ���")
+			return nil, fmt.Errorf("导出清单包含不受管理的文件名")
 		}
 	}
 	return names, nil
@@ -127,12 +127,12 @@ func Bundle(s model.State, dir string) error {
 
 func OwnDirectory(dir string) error {
 	if fi, err := os.Lstat(dir); err == nil && (!fi.IsDir() || fi.Mode()&os.ModeSymlink != 0) {
-		return fmt.Errorf("���·����������ͨĿ¼")
+		return fmt.Errorf("输出路径必须是普通目录")
 	}
 	entries, err := os.ReadDir(dir)
 	if err == nil && len(entries) > 0 {
 		if _, err = os.Stat(filepath.Join(dir, ".mip-proxy")); err != nil {
-			return fmt.Errorf("Ŀ¼ %s ���������ļ�����ѡ���Ŀ¼", dir)
+			return fmt.Errorf("目录 %s 已有其他文件，请选择空目录", dir)
 		}
 	}
 	if err = os.MkdirAll(dir, 0700); err != nil {

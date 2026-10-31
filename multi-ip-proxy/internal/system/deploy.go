@@ -130,7 +130,7 @@ func snapshot(ctx context.Context, l Layout, r network.Runner, s model.State, ol
 			return b, err
 		}
 		if !fi.Mode().IsRegular() {
-			return b, fmt.Errorf("�ܹ���·��������ͨ�ļ���%s", path)
+			return b, fmt.Errorf("受管理路径不是普通文件：%s", path)
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -165,7 +165,7 @@ func readBackup(l Layout, path string) (Backup, error) {
 	base, _ := filepath.Abs(filepath.Join(l.Data, "backups"))
 	rel, err := filepath.Rel(base, abs)
 	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-		return b, fmt.Errorf("����·�������ڴ˹���")
+		return b, fmt.Errorf("备份路径不属于此工具")
 	}
 	data, err := os.ReadFile(abs)
 	if err != nil {
@@ -186,7 +186,7 @@ func readBackup(l Layout, path string) (Backup, error) {
 	for _, f := range b.Files {
 		relExport, relErr := filepath.Rel(l.Exports, f.Path)
 		if !allowedMap[filepath.Clean(f.Path)] && !(relErr == nil && store.IsExportName(relExport)) {
-			return b, fmt.Errorf("���ݰ������ܹ�����·��")
+			return b, fmt.Errorf("备份包含不受管理的路径")
 		}
 	}
 	if b.Previous != nil {
@@ -218,7 +218,7 @@ func restore(ctx context.Context, l Layout, r network.Runner, b Backup, current 
 		}
 	}
 	if len(failures) > 0 {
-		return fmt.Errorf("ֹͣ����ʧ�ܣ���δ�ָ��ļ���%s", strings.Join(failures, "��"))
+		return fmt.Errorf("停止服务失败，尚未恢复文件：%s", strings.Join(failures, "；"))
 	}
 	for _, name := range Services {
 		if _, err := r.Run(ctx, "systemctl", "disable", name); err != nil && !missingUnit(ctx, r, name) {
@@ -273,7 +273,7 @@ func restore(ctx context.Context, l Layout, r network.Runner, b Backup, current 
 		}
 	}
 	if len(failures) > 0 {
-		return fmt.Errorf("�ָ����̴��ڴ���%s", strings.Join(failures, "��"))
+		return fmt.Errorf("恢复过程存在错误：%s", strings.Join(failures, "；"))
 	}
 	return nil
 }
@@ -311,7 +311,7 @@ func Apply(ctx context.Context, l Layout, r network.Runner, s model.State) (err 
 	}
 	defer unlock()
 	if err = Recover(ctx, l, r); err != nil {
-		return fmt.Errorf("�ָ��ϴ��жϵĲ���%w", err)
+		return fmt.Errorf("恢复上次中断的部署：%w", err)
 	}
 	return apply(ctx, l, r, s)
 }
@@ -325,7 +325,7 @@ func ApplyFile(ctx context.Context, l Layout, r network.Runner, state string) er
 	}
 	defer unlock()
 	if err = Recover(ctx, l, r); err != nil {
-		return fmt.Errorf("�ָ��ϴ��жϵĲ���%w", err)
+		return fmt.Errorf("恢复上次中断的部署：%w", err)
 	}
 	s, err := model.Load(state)
 	if err != nil {
@@ -339,7 +339,7 @@ func apply(ctx context.Context, l Layout, r network.Runner, s model.State) (err 
 		return err
 	}
 	if _, err = r.Run(ctx, "systemctl", "show", "--property=Version", "--value"); err != nil {
-		return fmt.Errorf("��Ҫ���õ� systemd �����������%w", err)
+		return fmt.Errorf("需要可用的 systemd 服务管理器：%w", err)
 	}
 	if err = network.VerifyLocal(ctx, r, s); err != nil {
 		return err
@@ -348,12 +348,12 @@ func apply(ctx context.Context, l Layout, r network.Runner, s model.State) (err 
 	if loaded, e := model.Load(l.State); e == nil {
 		old = &loaded
 	} else if !os.IsNotExist(e) {
-		return fmt.Errorf("��״̬��Ч��δ���ǣ�%w", e)
+		return fmt.Errorf("旧状态无效，未覆盖：%w", e)
 	}
 	if old == nil {
 		for _, path := range []string{l.Config, l.IPv6Config, filepath.Join(l.Units, ProxyService), filepath.Join(l.Units, RoutesService), filepath.Join(l.Units, CoverService)} {
 			if _, e := os.Lstat(path); e == nil {
-				return fmt.Errorf("����ͬ�����õ�û�б�����״̬��δ���ǣ�%s", path)
+				return fmt.Errorf("发现同名配置但没有本工具状态，未覆盖：%s", path)
 			} else if !os.IsNotExist(e) {
 				return e
 			}
@@ -384,7 +384,7 @@ func apply(ctx context.Context, l Layout, r network.Runner, s model.State) (err 
 		return err
 	}
 	if err = core.Check(ctx, r, l.Core, path); err != nil {
-		return fmt.Errorf("�������ü��ʧ�ܣ��ɷ���δ�޸ģ�%w", err)
+		return fmt.Errorf("核心配置检查失败，旧服务未修改：%w", err)
 	}
 	// Refuse unrelated files in the export directory before changing services.
 	if err = store.OwnDirectory(l.Exports); err != nil {
@@ -408,10 +408,10 @@ func apply(ctx context.Context, l Layout, r network.Runner, s model.State) (err 
 		}
 		recoveryErr := restore(context.Background(), l, r, b, &s)
 		if recoveryErr != nil {
-			err = fmt.Errorf("%v��%w�����ݣ�%s", err, recoveryErr, backupPath)
+			err = fmt.Errorf("%v；%w；备份：%s", err, recoveryErr, backupPath)
 		} else {
 			_ = os.Remove(l.Pending)
-			err = fmt.Errorf("%v���ѻָ�����ǰ״̬", err)
+			err = fmt.Errorf("%v；已恢复部署前状态", err)
 		}
 	}()
 	for _, name := range Services {
@@ -484,7 +484,7 @@ func apply(ctx context.Context, l Layout, r network.Runner, s model.State) (err 
 		case <-time.After(500 * time.Millisecond):
 		}
 		if _, err = r.Run(ctx, "systemctl", "is-active", "--quiet", ProxyService); err != nil {
-			return fmt.Errorf("���������������˳���%w", err)
+			return fmt.Errorf("代理服务启动后退出：%w", err)
 		}
 	}
 	if err = store.Export(s, l.Exports); err != nil {

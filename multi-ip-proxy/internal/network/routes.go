@@ -146,7 +146,7 @@ func CheckConflicts(ctx context.Context, r Runner, s model.State, old *model.Sta
 				}
 			}
 			if !owned {
-				return fmt.Errorf("·�ɹ������ȼ� %d �ѱ���������ռ�ã�δ�޸�", priority)
+				return fmt.Errorf("路由规则优先级 %d 已被其他配置占用，未修改", priority)
 			}
 		}
 		var ownedTable *model.Node
@@ -163,12 +163,12 @@ func CheckConflicts(ctx context.Context, r Runner, s model.State, old *model.Sta
 			return err
 		}
 		if ownedTable == nil && len(routes) > 0 {
-			return fmt.Errorf("·�ɱ� %d �ѱ�ռ�ã�δ�޸�", n.Table())
+			return fmt.Errorf("路由表 %d 已被占用，未修改", n.Table())
 		}
 		for _, row := range routes {
 			dst, _ := row["dst"].(string)
 			if ownedTable != nil && (managedDestination(dst, n) || managedDestination(dst, *ownedTable)) && !routeMatches(row, *ownedTable) {
-				return fmt.Errorf("·�ɱ� %d �� %s �ѱ����������޸ģ�δ����", n.Table(), dst)
+				return fmt.Errorf("路由表 %d 的 %s 已被其他配置修改，未覆盖", n.Table(), dst)
 			}
 		}
 	}
@@ -201,7 +201,7 @@ func Down(ctx context.Context, r Runner, s model.State) error {
 		}
 		if foreign {
 			if first == nil {
-				first = fmt.Errorf("�ڵ� %d �Ĺ������ȼ������������ã�δɾ��", n.ID)
+				first = fmt.Errorf("节点 %d 的规则优先级已有其他配置，未删除", n.ID)
 			}
 			continue
 		}
@@ -227,7 +227,7 @@ func Down(ctx context.Context, r Runner, s model.State) error {
 				}
 				if !safe {
 					if first == nil {
-						first = fmt.Errorf("·�ɱ� %d �� %s �ѱ����������޸ģ�δɾ��", n.Table(), cmd.Args[4])
+						first = fmt.Errorf("路由表 %d 的 %s 已被其他配置修改，未删除", n.Table(), cmd.Args[4])
 					}
 					continue
 				}
@@ -263,7 +263,7 @@ func Up(ctx context.Context, r Runner, s model.State) error {
 			if _, err := r.Run(ctx, cmd.Args...); err != nil {
 				cleanupErr := Down(ctx, r, s)
 				if cleanupErr != nil {
-					return fmt.Errorf("����·��ʧ�ܣ�%v������ʧ�ܣ�%w", err, cleanupErr)
+					return fmt.Errorf("添加路由失败：%v；清理失败：%w", err, cleanupErr)
 				}
 				return err
 			}

@@ -231,7 +231,7 @@ func Files(s model.State) (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	full, err := yaml.Marshal(object{"mixed-port": 7890, "allow-lan": false, "ipv6": false, "bind-address": "127.0.0.1", "mode": "rule", "log-level": "warning", "proxies": proxies, "proxy-groups": []any{object{"name": "�ڵ�ѡ��", "type": "select", "proxies": names}}, "rules": []string{"MATCH,�ڵ�ѡ��"}})
+	full, err := yaml.Marshal(object{"mixed-port": 7890, "allow-lan": false, "ipv6": false, "bind-address": "127.0.0.1", "mode": "rule", "log-level": "warning", "proxies": proxies, "proxy-groups": []any{object{"name": "节点选择", "type": "select", "proxies": names}}, "rules": []string{"MATCH,节点选择"}})
 	if err != nil {
 		return nil, err
 	}
@@ -243,18 +243,18 @@ func Files(s model.State) (map[string][]byte, error) {
 		clientOut = append(clientOut, outbounds...)
 	}
 	client := object{"log": object{"level": "warn"}, "dns": object{"strategy": "ipv4_only", "servers": []any{object{"type": "local", "tag": "local-dns"}}}, "inbounds": []any{object{"type": "mixed", "tag": "local", "listen": "127.0.0.1", "listen_port": 1080}}, "outbounds": clientOut, "endpoints": endpoints, "route": object{"rules": []any{object{"ip_version": 6, "action": "reject"}}, "final": "select", "default_domain_resolver": "local-dns"}}
-	readme := fmt.Sprintf("��ѡЭ�飺%s\n�ڵ�����%d��ÿ�� IP һ���ڵ㣬ȫ��ʹ��ͬһ��Э�飩\n\nlinks.txt�����з�������\nsubscription.txt��Base64 �������Ӽ��ϣ��ͻ�����֧�ֶ�ӦЭ�顣\nmihomo.yaml���ɵ���� Mihomo ���ã��ֶ�ѡ��ڵ㡣\nmihomo-provider.yaml��Mihomo proxy-provider ���ݡ�\nsing-box.json���ɵ���� sing-box �ͻ������á�\nnodes.csv���ڵ��嵥��\n\nTLS У�鱣�ֿ�����֤�����ܿͻ������Ρ������Զ������������ķ���\n��Щ�ļ������ڵ�ƾ�ݣ������Ʊ��档\n", s.Protocol, len(s.Nodes))
-	files := map[string][]byte{"links.txt": []byte(plain), "subscription.txt": []byte(base64.StdEncoding.EncodeToString([]byte(plain)) + "\n"), "mihomo.yaml": full, "mihomo-provider.yaml": provider, "sing-box.json": model.JSON(client), "nodes.csv": []byte(csvText.String()), "ʹ��˵��.txt": []byte(readme)}
+	readme := fmt.Sprintf("所选协议：%s\n节点数：%d（每个 IP 一个节点，全部使用同一种协议）\n\nlinks.txt：逐行分享链接\nsubscription.txt：Base64 分享链接集合；客户端须支持对应协议。\nmihomo.yaml：可导入的 Mihomo 配置，手动选择节点。\nmihomo-provider.yaml：Mihomo proxy-provider 内容。\nsing-box.json：可导入的 sing-box 客户端配置。\nnodes.csv：节点清单。\n\nTLS 校验保持开启；证书须受客户端信任。不会自动发布公网订阅服务。\n这些文件包含节点凭据，请妥善保存。\n", s.Protocol, len(s.Nodes))
+	files := map[string][]byte{"links.txt": []byte(plain), "subscription.txt": []byte(base64.StdEncoding.EncodeToString([]byte(plain)) + "\n"), "mihomo.yaml": full, "mihomo-provider.yaml": provider, "sing-box.json": model.JSON(client), "nodes.csv": []byte(csvText.String()), "使用说明.txt": []byte(readme)}
 	if s.Protocol == "wireguard" {
 		delete(files, "links.txt")
 		delete(files, "subscription.txt")
-		files["ʹ��˵��.txt"] = []byte(strings.ReplaceAll(readme, "links.txt�����з�������\nsubscription.txt��Base64 �������Ӽ��ϣ��ͻ�����֧�ֶ�ӦЭ�顣\n", "") + "\nWireGuard û��ͳһ�ķ��� URI���뵼��ÿ�� IP ��Ӧ�� .conf �������ͻ������á�\nÿ�� IP ����һ���ͻ��� peer��ͬһ���������ڶ�̨�豸ͬʱ���ã����� WireGuard �Ķ˵����λụ����ռ���ӡ�\n������ʹ���û�̬�˵�ת�� IPv4 TCP/UDP������ŵ�������ں� VPN/ICMP ��Ϊ��\n")
+		files["使用说明.txt"] = []byte(strings.ReplaceAll(readme, "links.txt：逐行分享链接\nsubscription.txt：Base64 分享链接集合；客户端须支持对应协议。\n", "") + "\nWireGuard 没有统一的分享 URI；请导入每个 IP 对应的 .conf 或上述客户端配置。\n每个 IP 导出一个客户端 peer。同一配置请勿在多台设备同时启用，否则 WireGuard 的端点漫游会互相抢占连接。\n本工具使用用户态端点转发 IPv4 TCP/UDP，不承诺完整的内核 VPN/ICMP 行为。\n")
 		for _, n := range s.Nodes {
 			files[n.Name(s.Protocol)+".conf"] = []byte(fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = %s/32\nDNS = 1.1.1.1\nMTU = 1280\n\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = %s\nPersistentKeepalive = 25\n", n.ClientPrivateKey, n.WGClientIP(), model.WGKey(n.PublicKey), s.Endpoint(n)))
 		}
 	}
 	if s.Protocol == "socks5" {
-		files["ʹ��˵��.txt"] = []byte(readme + "\nSOCKS5 ���˺ż����������ܡ�UDP ASSOCIATE ʹ�ö�̬�м̶˿ڣ����м����˿ڵ� UDP �����㹻��ֱ�Ӱ󶨹��� IP ʱ���谴�ͻ�����Դ���ж�̬ UDP �˿ڣ�NAT �豣����Щ�˿ڣ��ͻ������ܴ������ص�˽���м̵�ַ�����̶��˿�ӳ�䲻�ܱ�֤ SOCKS5 UDP ���á�\nSOCKS5 �������ӵĵ����ʽ��ͻ��˶��죬������ʹ�� Mihomo/sing-box ���û��ֶ���д�˺š�\n")
+		files["使用说明.txt"] = []byte(readme + "\nSOCKS5 的账号及流量不加密。UDP ASSOCIATE 使用动态中继端口，放行监听端口的 UDP 并不足够。直接绑定公网 IP 时还需按客户端来源放行动态 UDP 端口；NAT 需保留这些端口，客户端须能处理返回的私网中继地址。仅固定端口映射不能保证 SOCKS5 UDP 可用。\nSOCKS5 分享链接的导入格式因客户端而异，可优先使用 Mihomo/sing-box 配置或手动填写账号。\n")
 	}
 	return files, nil
 }
