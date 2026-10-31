@@ -1,0 +1,60 @@
+name: Build and release mip-proxy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'multi-ip-proxy/**'
+      - '.github/workflows/mip-proxy-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mip-proxy-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the exact triggering commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git -C source fetch --depth=1 origin "$GITHUB_SHA"
+          git -C source checkout --detach FETCH_HEAD
+      - name: Install verified Go 1.27.3 toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL --retry 2 https://go.dev/dl/go1.27.3.linux-amd64.tar.gz -o "$RUNNER_TEMP/go.tar.gz"
+          printf '%s  %s\n' 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40 "$RUNNER_TEMP/go.tar.gz" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/mip-go"
+          tar -xzf "$RUNNER_TEMP/go.tar.gz" -C "$RUNNER_TEMP/mip-go"
+          echo "$RUNNER_TEMP/mip-go/go/bin" >> "$GITHUB_PATH"
+      - name: Unit tests, vet and static release packages
+        working-directory: source/multi-ip-proxy
+        run: python3 scripts/build.py
+      - name: Real protocol, routing, IPv6 and installer tests
+        working-directory: source/multi-ip-proxy
+        run: sh scripts/verify-linux.sh
+      - name: Publish versioned release after successful checks
+        working-directory: source/multi-ip-proxy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(./dist/mip-proxy-linux-amd64 version | awk '{print $2}')
+          tag="v$version"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; bump the program version before publishing new assets." >&2
+            exit 1
+          fi
+          gh release create "$tag" dist/mip-proxy-linux-amd64.tar.gz dist/mip-proxy-linux-arm64.tar.gz dist/mip-proxy-source.tar.gz dist/install.sh dist/SHA256SUMS --target "$GITHUB_SHA" --title "mip-proxy $tag" --notes-file RELEASE_NOTES.txt

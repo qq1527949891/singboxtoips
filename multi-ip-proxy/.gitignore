@@ -1,0 +1,5 @@
+/dist/
+/.cache/
+/demo/
+*.test
+__pycache__/
