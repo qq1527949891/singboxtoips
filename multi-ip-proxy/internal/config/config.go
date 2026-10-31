@@ -42,11 +42,15 @@ func Certificate(s model.State) ([]string, []string, error) {
 }
 
 func Server(s model.State) (Object, error) {
+	return ServerWithACMEDirectory(s, "/var/lib/mip-proxy/acme")
+}
+
+func ServerWithACMEDirectory(s model.State, acmeDirectory string) (Object, error) {
 	if err := s.Validate(); err != nil {
 		return nil, err
 	}
 	var cert, key []string
-	if s.NeedsTLS() {
+	if s.NeedsTLS() && !s.AutomaticCertificate() {
 		var err error
 		cert, key, err = Certificate(s)
 		if err != nil {
@@ -115,6 +119,12 @@ func Server(s model.State) (Object, error) {
 				in["bind_interface"] = n.Interface
 			}
 		}
+		if s.AutomaticCertificate() {
+			tls := in["tls"].(Object)
+			delete(tls, "certificate")
+			delete(tls, "key")
+			tls["certificate_provider"] = "mip-certificate"
+		}
 		if s.Protocol == "wireguard" {
 			endpoints = append(endpoints, in)
 		} else {
@@ -126,7 +136,11 @@ func Server(s model.State) (Object, error) {
 	}
 	// Unknown inbounds must never silently use another node's source address.
 	rules = append(rules, Object{"action": "reject"})
-	return Object{"log": Object{"level": "warn", "timestamp": true}, "dns": Object{"servers": dnsServers, "strategy": "ipv4_only"}, "inbounds": inbounds, "endpoints": endpoints, "outbounds": outbounds, "route": Object{"rules": rules, "default_domain_resolver": fmt.Sprintf("dns-%d", s.Nodes[0].ID)}}, nil
+	result := Object{"log": Object{"level": "warn", "timestamp": true}, "dns": Object{"servers": dnsServers, "strategy": "ipv4_only"}, "inbounds": inbounds, "endpoints": endpoints, "outbounds": outbounds, "route": Object{"rules": rules, "default_domain_resolver": fmt.Sprintf("dns-%d", s.Nodes[0].ID)}}
+	if s.AutomaticCertificate() {
+		result["certificate_providers"] = []any{Object{"type": "acme", "tag": "mip-certificate", "domain": []string{s.ServerName}, "default_server_name": s.ServerName, "data_directory": acmeDirectory, "provider": "letsencrypt", "key_type": "p256", "profile": "shortlived", "disable_tls_alpn_challenge": true}}
+	}
+	return result, nil
 }
 
 const CoverHTML = "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Welcome</title><body><h1>Welcome</h1><p>This service is available.</p></body></html>"

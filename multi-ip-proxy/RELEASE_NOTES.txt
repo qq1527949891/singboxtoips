@@ -1,4 +1,14 @@
-mip-proxy 0.1.1
+mip-proxy 0.1.2
+
+普通部署向导只选择协议，其余可确定设置自动采用推荐值：全部 IP、443 监听端口、网卡/网关对应的路由方式、已有节点凭据。已有部署保留原端口。自定义设置可使用 mip-proxy wizard --advanced；预览可使用 --out。
+
+Trojan、VMess、Hysteria2、TUIC 默认自动申请可信的免费公网 IP 证书并自动续期，无需购买域名或填写证书文件。验证 IP 的 TCP 80 必须允许公网访问。私钥只保存在服务器，客户端 TLS 验证保持开启。
+
+签发前检查 TCP 80 冲突；部署等待可信证书就绪后才导出节点，失败会回滚。使用 P-256 密钥和 shortlived 证书配置，核心自动续期和加载证书。
+
+新增真实 ACME HTTP-01、IP 证书与四种 TLS 协议双 IP 转发测试，使用固定版本的 Pebble 测试 CA，测试证书不会用于生产。
+
+以下为 v0.1.1 更新：
 
 Debian 12+ 多 IP 单协议代理节点工具，支持 SOCKS5、Shadowsocks、VMess、VLESS + REALITY、Trojan、Hysteria2、TUIC、WireGuard。
 

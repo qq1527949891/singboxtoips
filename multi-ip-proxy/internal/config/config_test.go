@@ -63,6 +63,30 @@ func TestRejectCertificateMismatch(t *testing.T) {
 	}
 }
 
+func TestAutomaticCertificateUsesSharedProvider(t *testing.T) {
+	for _, protocol := range []string{"trojan", "vmess", "hysteria2", "tuic"} {
+		t.Run(protocol, func(t *testing.T) {
+			s := testutil.State(t, protocol)
+			s.CertificateMode, s.ServerName = "acme-ip", s.Nodes[0].PublicIP
+			s.Certificate, s.Key = "", ""
+			c, err := config.ServerWithACMEDirectory(s, "/private/acme")
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider := c["certificate_providers"].([]any)[0].(config.Object)
+			if provider["key_type"] != "p256" || provider["profile"] != "shortlived" || provider["default_server_name"] != s.ServerName || provider["disable_tls_alpn_challenge"] != true {
+				t.Fatal("wrong IP certificate / challenge settings", provider)
+			}
+			for _, inbound := range c["inbounds"].([]any) {
+				tls := inbound.(config.Object)["tls"].(config.Object)
+				if tls["certificate_provider"] != provider["tag"] || tls["certificate"] != nil || tls["key"] != nil {
+					t.Fatal("automatic certificates were embedded or not shared")
+				}
+			}
+		})
+	}
+}
+
 func TestHysteria2RejectsIncompatibleEd25519Certificate(t *testing.T) {
 	s := testutil.State(t, "hysteria2")
 	public, private, err := ed25519.GenerateKey(rand.Reader)

@@ -18,11 +18,15 @@ type serviceRunner struct {
 	active, enabled      map[string]bool
 	failCheck, failStart bool
 	failStop             string
+	port80Busy           bool
 }
 
 func (r *serviceRunner) Run(_ context.Context, args ...string) ([]byte, error) {
 	joined := strings.Join(args, " ")
 	r.calls = append(r.calls, joined)
+	if args[0] == "ss" && r.port80Busy {
+		return []byte("LISTEN 0 128 0.0.0.0:80 0.0.0.0:*\n"), nil
+	}
 	if len(args) > 1 && args[1] == "version" {
 		return []byte("sing-box version " + model.CoreVersion + "\n"), nil
 	}
@@ -167,6 +171,26 @@ func TestInvalidCoreConfigDoesNotStopExistingService(t *testing.T) {
 	}
 	if !r.active[ProxyService] {
 		t.Fatal("old service stopped")
+	}
+}
+
+func TestAutomaticCertificatePortConflictRestoresExistingDeployment(t *testing.T) {
+	l := Paths(t.TempDir())
+	old := testutil.State(t, "reality")
+	if err := store.Atomic(l.State, model.JSON(old), 0600); err != nil {
+		t.Fatal(err)
+	}
+	candidate := testutil.State(t, "hysteria2")
+	candidate.CertificateMode, candidate.ServerName = "acme-ip", candidate.Nodes[0].PublicIP
+	candidate.Certificate, candidate.Key = "", ""
+	r := runner()
+	r.port80Busy, r.active[ProxyService], r.enabled[ProxyService] = true, true, true
+	if err := Apply(context.Background(), l, r, candidate); err == nil || !strings.Contains(err.Error(), "TCP 80") {
+		t.Fatal("did not reject occupied validation port", err)
+	}
+	restored, err := model.Load(l.State)
+	if err != nil || restored.Protocol != old.Protocol || !r.active[ProxyService] || !r.enabled[ProxyService] {
+		t.Fatal("previous deployment was not restored after ACME port conflict", err)
 	}
 }
 

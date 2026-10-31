@@ -26,6 +26,32 @@ func TestRejectMixedProtocolAndDuplicateEndpoints(t *testing.T) {
 	}
 }
 
+func TestAutomaticIPCertificateConstraints(t *testing.T) {
+	s := testutil.State(t, "hysteria2")
+	s.CertificateMode, s.ServerName = "acme-ip", s.Nodes[0].PublicIP
+	s.Certificate, s.Key = "", ""
+	if err := s.Validate(); err != nil {
+		t.Fatal("automatic issuance must not need existing PEM files", err)
+	}
+	s.ServerName = "example.com"
+	if s.Validate() == nil {
+		t.Fatal("accepted a domain in automatic IP mode")
+	}
+	s.ServerName = s.Nodes[0].PublicIP
+	s.Protocol, s.Port = "trojan", 80
+	if s.Validate() == nil {
+		t.Fatal("proxy would occupy the ACME validation port")
+	}
+	s.Protocol = "hysteria2"
+	if err := s.Validate(); err != nil {
+		t.Fatal("UDP 80 does not conflict with ACME TCP 80", err)
+	}
+	s.Protocol = "shadowsocks"
+	if s.Validate() == nil {
+		t.Fatal("enabled ACME for a protocol without TLS")
+	}
+}
+
 func TestSecretsIndependentAndKeyIntegrity(t *testing.T) {
 	s := testutil.State(t, "reality")
 	if s.Nodes[0].UUID == s.Nodes[1].UUID || s.Nodes[0].Password == s.Nodes[1].Password || s.Nodes[0].PrivateKey == s.Nodes[1].PrivateKey {

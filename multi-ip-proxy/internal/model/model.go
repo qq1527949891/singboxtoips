@@ -24,10 +24,10 @@ type Protocol struct {
 // This is a contextual engineering recommendation, not a measured universal ranking.
 var Protocols = []Protocol{
 	{"reality", "VLESS + REALITY", "优先推荐：TLS 外观与未认证探测回落；TCP 可用时适用", "可转发 UDP；外层 TCP 丢包时可能增加抖动", "无需自有域名证书；需要可用的 TLS 握手目标"},
-	{"trojan", "Trojan + TLS", "HTTPS 外观，未认证请求回落到网页", "可转发 UDP；外层使用 TCP", "需要域名及匹配的证书/私钥"},
-	{"hysteria2", "Hysteria2", "HTTP/3 外观，可选 Salamander 混淆；依赖 UDP 可达", "游戏优先候选：使用 QUIC 数据报转发 UDP", "需要域名及匹配的证书/私钥"},
-	{"vmess", "VMess + TLS", "TLS 外观与 AEAD 认证；没有独立网页回落", "可转发 UDP；外层使用 TCP", "需要域名及匹配的证书/私钥"},
-	{"tuic", "TUIC v5", "TLS/QUIC 加密；不提供同等的网页探测回落", "游戏候选：native UDP 数据报模式", "需要域名及匹配的证书/私钥"},
+	{"trojan", "Trojan + TLS", "HTTPS 外观，未认证请求回落到网页", "可转发 UDP；外层使用 TCP", "可自动申请免费 IP 证书，无需域名；或使用已有证书"},
+	{"hysteria2", "Hysteria2", "HTTP/3 外观，可选 Salamander 混淆；依赖 UDP 可达", "游戏优先候选：使用 QUIC 数据报转发 UDP", "可自动申请免费 IP 证书，无需域名；或使用已有证书"},
+	{"vmess", "VMess + TLS", "TLS 外观与 AEAD 认证；没有独立网页回落", "可转发 UDP；外层使用 TCP", "可自动申请免费 IP 证书，无需域名；或使用已有证书"},
+	{"tuic", "TUIC v5", "TLS/QUIC 加密；不提供同等的网页探测回落", "游戏候选：native UDP 数据报模式", "可自动申请免费 IP 证书，无需域名；或使用已有证书"},
 	{"shadowsocks", "Shadowsocks AEAD", "加密但没有标准 TLS/HTTP 外观，作为兼容选项", "直接转发 UDP；受 UDP 限制影响", "无需域名证书"},
 	{"wireguard", "WireGuard", "标准 WireGuard 不提供流量混淆，依赖 UDP 可达", "原生隧道候选；本工具使用用户态端点", "无需证书；各节点使用独立 UDP 端口与策略路由"},
 	{"socks5", "SOCKS5（用户名/密码）", "不加密、不伪装，仅作为兼容选项", "支持 TCP 与协商的动态端口 UDP 中继", "无需证书；UDP 还需放行动态中继端口，NAT 有额外限制"},
@@ -99,17 +99,18 @@ func (n Node) MarkPriority() int           { return n.SourcePriority() + 1 }
 func (n Node) Name(protocol string) string { return fmt.Sprintf("%s-%s", n.PublicIP, protocol) }
 
 type State struct {
-	Schema        int    `json:"schema"`
-	Protocol      string `json:"protocol"`
-	Port          int    `json:"port"`
-	ServerName    string `json:"server_name,omitempty"`
-	RealityTarget string `json:"reality_target,omitempty"`
-	RealityPort   int    `json:"reality_port,omitempty"`
-	Certificate   string `json:"certificate,omitempty"`
-	Key           string `json:"key,omitempty"`
-	ObfsPassword  string `json:"obfs_password,omitempty"`
-	CoreVersion   string `json:"core_version"`
-	Nodes         []Node `json:"nodes"`
+	Schema          int    `json:"schema"`
+	Protocol        string `json:"protocol"`
+	Port            int    `json:"port"`
+	ServerName      string `json:"server_name,omitempty"`
+	RealityTarget   string `json:"reality_target,omitempty"`
+	RealityPort     int    `json:"reality_port,omitempty"`
+	Certificate     string `json:"certificate,omitempty"`
+	Key             string `json:"key,omitempty"`
+	CertificateMode string `json:"certificate_mode,omitempty"`
+	ObfsPassword    string `json:"obfs_password,omitempty"`
+	CoreVersion     string `json:"core_version"`
+	Nodes           []Node `json:"nodes"`
 }
 
 var ifacePattern = regexp.MustCompile(`^[a-zA-Z0-9_.:@-]{1,64}$`)
@@ -132,6 +133,10 @@ func ValidHost(s string) bool {
 
 func (s State) NeedsTLS() bool {
 	return s.Protocol == "trojan" || s.Protocol == "hysteria2" || s.Protocol == "tuic" || s.Protocol == "vmess"
+}
+
+func (s State) AutomaticCertificate() bool {
+	return s.NeedsTLS() && s.CertificateMode == "acme-ip"
 }
 func (s State) Network() string {
 	if s.Protocol == "hysteria2" || s.Protocol == "tuic" || s.Protocol == "wireguard" {
@@ -174,8 +179,30 @@ func (s State) Validate() error {
 			return fmt.Errorf("REALITY 握手目标需要 IPv4 地址或可解析 IPv4 的域名")
 		}
 	}
-	if s.NeedsTLS() && (!ValidHost(s.ServerName) || s.Certificate == "" || s.Key == "") {
-		return fmt.Errorf("此协议需要 TLS 域名、证书及私钥")
+	if s.CertificateMode != "" && s.CertificateMode != "acme-ip" {
+		return fmt.Errorf("未知的证书方式")
+	}
+	if s.CertificateMode != "" && !s.NeedsTLS() {
+		return fmt.Errorf("当前协议不使用自动 TLS 证书")
+	}
+	if s.NeedsTLS() {
+		if !ValidHost(s.ServerName) {
+			return fmt.Errorf("TLS 证书域名或 IP 无效")
+		}
+		if s.AutomaticCertificate() {
+			selected := false
+			for _, node := range s.Nodes {
+				selected = selected || node.PublicIP == s.ServerName
+			}
+			if !selected {
+				return fmt.Errorf("自动 IP 证书必须使用所选节点之一的公网 IPv4")
+			}
+			if s.Port == 80 && strings.Contains(s.Network(), "tcp") {
+				return fmt.Errorf("自动证书需要 TCP 80 验证，请将代理监听端口改为其他端口")
+			}
+		} else if s.Certificate == "" || s.Key == "" {
+			return fmt.Errorf("此协议需要匹配的 TLS 证书及私钥，或选择自动申请 IP 证书")
+		}
 	}
 	if s.ObfsPassword != "" && s.Protocol != "hysteria2" {
 		return fmt.Errorf("只有 Hysteria2 可设置混淆密码")

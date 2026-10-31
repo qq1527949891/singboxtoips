@@ -24,7 +24,7 @@ const CoverService = "mip-proxy-cover.service"
 
 var Services = []string{ProxyService, CoverService, RoutesService}
 
-type Layout struct{ Root, Data, State, Config, App, Core, Units, Exports, Pending, Latest, Lock, IPv6Config string }
+type Layout struct{ Root, Data, State, Config, App, Core, Units, Exports, Pending, Latest, Lock, IPv6Config, ACME string }
 
 func Paths(root string) Layout {
 	root = filepath.Clean(root)
@@ -35,6 +35,7 @@ func Paths(root string) Layout {
 	l.Latest = filepath.Join(l.Data, "latest-backup.json")
 	l.Lock = filepath.Join(l.Data, "operation.lock")
 	l.IPv6Config = filepath.Join(root, "etc/sysctl.d/99-mip-proxy-ipv6.conf")
+	l.ACME = filepath.Join(l.Data, "acme")
 	return l
 }
 
@@ -48,6 +49,9 @@ func Units(l Layout, s model.State) map[string][]byte {
 	}
 	proxy := fmt.Sprintf("[Unit]\nDescription=Multi IP proxy nodes\nWants=network-online.target\nAfter=network-online.target %s\nRequires=%s\n%s\n[Service]\nType=simple\nExecStartPre=%s check -c %s\nExecStart=%s run -c %s\nRestart=on-failure\nRestartSec=3\nLimitNOFILE=65536\nUMask=0077\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\nProtectSystem=strict\nCapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW\n\n[Install]\nWantedBy=multi-user.target\n", RoutesService, RoutesService, extra, quote(l.Core), quote(l.Config), quote(l.Core), quote(l.Config))
 	proxy = strings.Replace(proxy, "ExecStartPre=", "ExecStartPre="+quote(l.App)+" ipv6 disable\nExecStartPre=", 1)
+	if s.AutomaticCertificate() {
+		proxy = strings.Replace(proxy, "ProtectSystem=strict\n", "ProtectSystem=strict\nReadWritePaths="+quote(l.ACME)+"\n", 1)
+	}
 	routes := fmt.Sprintf("[Unit]\nDescription=Routes for multi IP proxy nodes\nWants=network-online.target\nAfter=network-online.target\nBefore=%s\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=%s routes up --state %s\nExecStop=%s routes down --state %s\nTimeoutStartSec=90\nTimeoutStopSec=90\nUMask=0077\n\n[Install]\nWantedBy=multi-user.target\n", ProxyService, quote(l.App), quote(l.State), quote(l.App), quote(l.State))
 	cover := fmt.Sprintf("[Unit]\nDescription=HTTP fallback for Trojan listener\nAfter=network.target\n\n[Service]\nType=simple\nExecStart=%s cover\nRestart=on-failure\nUMask=0077\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\nProtectSystem=strict\nCapabilityBoundingSet=\n\n[Install]\nWantedBy=multi-user.target\n", quote(l.App))
 	return map[string][]byte{ProxyService: []byte(proxy), RoutesService: []byte(routes), CoverService: []byte(cover)}
@@ -370,7 +374,7 @@ func apply(ctx context.Context, l Layout, r network.Runner, s model.State) (err 
 	if err = core.Version(ctx, r, l.Core); err != nil {
 		return err
 	}
-	candidate, err := config.Server(s)
+	candidate, err := config.ServerWithACMEDirectory(s, l.ACME)
 	if err != nil {
 		return err
 	}
@@ -423,6 +427,18 @@ func apply(ctx context.Context, l Layout, r network.Runner, s model.State) (err 
 	}
 	if old != nil {
 		if err = network.Down(ctx, r, *old); err != nil {
+			return err
+		}
+	}
+	if s.AutomaticCertificate() {
+		listeners, e := r.Run(ctx, "ss", "-H", "-l", "-n", "-t", "sport = :80")
+		if e != nil {
+			return fmt.Errorf("检查证书验证端口：%w", e)
+		}
+		if len(strings.TrimSpace(string(listeners))) != 0 {
+			return fmt.Errorf("TCP 80 已被其他程序占用，无法自动申请/续期证书；请释放端口或使用已有证书")
+		}
+		if err = os.MkdirAll(l.ACME, 0700); err != nil {
 			return err
 		}
 	}
@@ -485,6 +501,11 @@ func apply(ctx context.Context, l Layout, r network.Runner, s model.State) (err 
 		}
 		if _, err = r.Run(ctx, "systemctl", "is-active", "--quiet", ProxyService); err != nil {
 			return fmt.Errorf("代理服务启动后退出：%w", err)
+		}
+	}
+	if s.AutomaticCertificate() {
+		if err = waitCertificate(ctx, l, r, s.ServerName); err != nil {
+			return err
 		}
 	}
 	if err = store.Export(s, l.Exports); err != nil {

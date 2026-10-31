@@ -5,6 +5,9 @@ if [ "$(readlink /proc/self/ns/net)" = "$(readlink /proc/1/ns/net)" ]; then
     echo "Refusing to change the host network; run this script through unshare -n." >&2
     exit 1
 fi
+# Keep fixed test listeners out of the kernel's ephemeral source-port allocator.
+# This sysctl is local to the new network namespace, as are the addresses below.
+sysctl -q -w net.ipv4.ip_local_reserved_ports=35000-42999
 ip link set lo up
 ip addr add 198.18.0.1/32 dev lo
 ip -6 addr add 2001:db8::1/128 dev lo

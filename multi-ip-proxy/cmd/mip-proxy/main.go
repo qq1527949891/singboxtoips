@@ -76,15 +76,17 @@ func run(ctx context.Context, args []string) error {
 		help()
 		return nil
 	case "version", "--version":
-		fmt.Printf("mip-proxy 0.1.1 / sing-box %s\n", model.CoreVersion)
+		fmt.Printf("mip-proxy 0.1.2 / sing-box %s\n", model.CoreVersion)
 		return nil
 	case "wizard":
 		inventory := fs.String("inventory", "", "本机/公网 IP 映射 CSV")
 		out := fs.String("out", "", "仅生成预览目录")
 		apply := fs.Bool("apply", false, "生成后部署到本机 Linux")
+		advanced := fs.Bool("advanced", false, "自定义 IP、端口、策略路由与证书")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
+		terminal.Advanced = *advanced
 		if *apply {
 			if err := requireLinux(); err != nil {
 				return err
@@ -104,7 +106,7 @@ func run(ctx context.Context, args []string) error {
 			}
 			fmt.Println("预览及节点配置：", *out)
 		}
-		deploy := *apply
+		deploy := *apply || (*out == "" && !terminal.Advanced)
 		if !deploy && *out == "" {
 			answer, e := terminal.Number("1 部署到本机；2 仅生成配置", 1, 1, 2)
 			if e != nil {
@@ -125,6 +127,9 @@ func run(ctx context.Context, args []string) error {
 			}
 			if err = ensureCore(ctx, l.Core); err != nil {
 				return err
+			}
+			if s.AutomaticCertificate() {
+				fmt.Fprintln(terminal.Out, "正在部署并等待 IP 证书签发，最多 3 分钟；验证 IP 的 TCP 80 需允许公网访问。")
 			}
 			if err = system.Apply(ctx, l, r, s); err != nil {
 				return err
@@ -305,12 +310,17 @@ func menu(ctx context.Context, t *ui.UI, l system.Layout, r network.Runner) erro
 				var s model.State
 				s, err = t.Wizard(ctx, r, "", old)
 				if err == nil {
-					var action int
-					action, err = t.Number("1 应用以上配置；2 仅导出预览", 1, 1, 2)
+					action := 1
+					if t.Advanced {
+						action, err = t.Number("1 应用以上配置；2 仅导出预览", 1, 1, 2)
+					}
 					if err == nil {
 						if action == 1 {
 							err = ensureCore(ctx, l.Core)
 							if err == nil {
+								if s.AutomaticCertificate() {
+									fmt.Fprintln(t.Out, "正在部署并等待 IP 证书签发，最多 3 分钟；验证 IP 的 TCP 80 需允许公网访问。")
+								}
 								err = system.Apply(ctx, l, r, s)
 							}
 							if err == nil {
@@ -349,7 +359,7 @@ func help() {
 
 无参数运行：中文交互菜单，协议按抗封锁需求参考排序。
 
-  wizard [--inventory ip-map.csv] [--out preview] [--apply]
+  wizard [--advanced] [--inventory ip-map.csv] [--out preview] [--apply]
   generate --state state.json --out bundle
   apply --state state.json
   export [--state state.json] [--out export]
@@ -361,9 +371,10 @@ func help() {
   demo --protocol reality|trojan|hysteria2|vmess|tuic|shadowsocks|wireguard|socks5|all --out demo
 
 所有真实节点统一使用一种协议；更换协议时整体替换。
+默认只选择协议，其他可识别设置自动采用推荐值；不带 --out 时默认部署。--advanced 可自定义。
 自动探测/部署支持 Linux IPv4、systemd，amd64/arm64。
 导出分享链接、Base64 链接集合、Mihomo YAML、sing-box JSON；WireGuard 导出 .conf。
-预览不修改系统服务/路由。TLS 协议需要客户端信任的域名证书。
+预览不修改系统服务/路由。TLS 协议支持自动申请免费 IP 证书及自动续期，也可使用已有证书。
 抗封锁参考顺序不代表任何网络下的实测排名。`)
 }
 

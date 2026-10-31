@@ -44,7 +44,7 @@ sudo sh install.sh
 脚本自动识别 amd64/arm64，查询该仓库最新 Release。如果已安装相同版本，复用现有程序；否则下载对应的 `mip-proxy-linux-<架构>.tar.gz`，核对 Release 中 `SHA256SUMS` 后安装，再进入中文菜单。下载失败或校验不符会终止安装。脚本支持通过 `MIP_VERSION` 固定版本：
 
 ```sh
-sudo env MIP_VERSION=v0.1.1 sh install.sh
+sudo env MIP_VERSION=v0.1.2 sh install.sh
 sudo sh install.sh --no-menu
 sh install.sh --download-only ./packages
 ```
@@ -70,10 +70,21 @@ sudo ./mip-proxy
 交互顺序：
 
 1. 从按抗封锁需求排列的菜单选择**一个**协议。
-2. 自动读取网卡 IPv4 与路由，选择需要的 IP。
-3. 确认每个本机 IP 对应的公网 IP、监听端口，按需配置多网卡策略路由。
-4. 填写该协议必需的 SNI、证书等信息。
-5. 查看具体的入口/出口摘要，选择部署或只生成预览。
+2. 自动读取网卡 IPv4 与路由，默认使用全部可用 IP；已有节点保留 ID 和凭据。
+3. 自动使用监听端口 443（已有部署保留原端口），按网卡/网关选择推荐策略路由。
+4. TLS 协议默认自动申请公网 IP 证书并自动续期，无需购买域名或填写 PEM 路径；已有手动证书继续使用。
+5. 显示入口/出口摘要后部署。无法可靠判断的 NAT 入站映射、缺失网关等必要信息才会询问。
+
+不同 IP 可共用端口，各节点的入口和出站地址分别绑定。WireGuard 按节点 ID 分配不同 UDP 端口。443 是默认值，不能单靠端口保证抗封锁；已被其他服务占用时不会覆盖或停止该服务。
+
+需要自定义 IP 选择、端口、路由、REALITY 握手目标、证书方式或 Salamander 混淆时使用高级模式；需要预览时明确指定输出目录：
+
+```sh
+sudo mip-proxy wizard --advanced
+sudo mip-proxy wizard --out /root/mip-preview
+```
+
+不带 `--out` 的普通向导默认部署，无需再次选择“应用配置”。高级模式保留自定义和预览选择。
 
 按 Ctrl+C 取消；正式修改发生在配置检查和备份完成之后。部署失败会尝试恢复旧配置、旧凭据及原有服务状态，恢复错误不会隐藏。
 
@@ -107,19 +118,27 @@ CSV 表头：`local_ip,public_ip,interface,gateway,prefix`。后 3 项仅在策�
 
 ## 域名和证书
 
-REALITY 不需要自有证书，需要服务器可访问的 TLS 握手目标；SNI、握手目标均可在向导中填写。默认目标只是起点，应检查其在目标服务器上的 TLS 兼容性和可达性。
+REALITY 不需要自有证书，需要服务器可访问的 TLS 握手目标；普通向导采用默认目标，SNI、握手目标可在 `--advanced` 中修改。默认目标只是起点，应检查其在目标服务器上的 TLS 兼容性和可达性。
 
-Trojan、VMess、Hysteria2 和 TUIC 要求现有 PEM 证书完整链与私钥，且证书匹配填写的 SNI。所有节点可以连接各自公网 IP、共用同一域名证书。客户端 TLS 校验保持开启，不生成 `insecure=1` 或 `skip-cert-verify: true`。
+Trojan、VMess、Hysteria2 和 TUIC 使用 TLS 证书证明服务器身份；私钥由服务器保管。默认无需自有域名，工具选取一个节点公网 IPv4，通过 Let's Encrypt 自动申请受信任的 IP 证书。所有节点连接各自公网 IP，共用这一证书身份，客户端配置自动填写验证 IP；出站仍分别绑定各节点地址。
+
+IP 证书使用 `shortlived` 配置，有效期约 6 天，由 sing-box 内置 ACME 管理器自动续期，无需安装 certbot、acme.sh 或设置额外定时任务。使用兼容 Hysteria2 的 P-256 密钥。依据：[Let's Encrypt IP 证书](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability)、[sing-box ACME](https://sing-box.sagernet.org/configuration/shared/certificate-provider/acme/)。
+
+**证书验证 IP 的 TCP 80 必须允许公网访问，供首次签发和以后续期使用。** 云安全组、防火墙和 NAT 都需放行；与代理使用的 TCP/UDP 443 分开。工具不会清空防火墙，不会停止占用 80 的网站；发现占用会报错并恢复部署前状态。TLS-ALPN 验证关闭，避免与代理的 TCP 443 监听冲突。
+
+部署最多等待 3 分钟，核对缓存证书的可信链、IP 身份和有效期后才导出节点；签发失败会回滚，并给出日志查看命令。证书和 ACME 账户私钥保存在 `/var/lib/mip-proxy/acme`，目录仅供 root 访问，私钥不进入节点导出。核心运行期间自动加载续期证书；保留缓存可避免重复签发。
+
+高级模式也可使用已有 PEM 完整链与私钥，证书需匹配填写的域名或 IP。客户端 TLS 校验保持开启，不生成 `insecure=1` 或 `skip-cert-verify: true`。
 
 Hysteria2 使用 ECDSA 或 RSA 证书，工具会拒绝与当前核心 Chrome 握手模拟不兼容的 Ed25519 证书。
 
-证书可由已有 ACME 工具签发与续期。证书更新后，运行以下命令加载新证书；该命令会先验证再替换，节点凭据保持不变：
+使用已有 PEM 文件时，可由已有 ACME 工具签发与续期。文件更新后，运行以下命令加载新证书；该命令会先验证再替换，节点凭据保持不变。自动 IP 证书模式无需执行此操作：
 
 ```sh
 sudo mip-proxy apply --state /var/lib/mip-proxy/state.json
 ```
 
-本版本不自动申请或续期证书。离线 demo 使用的短期自签证书仅供配置检查/测试，不属于生产证书。
+离线 demo 使用的短期自签证书仅供配置检查/测试，不属于生产证书。
 
 ## 节点导出
 
@@ -192,7 +211,7 @@ python3 scripts/build.py
 sh scripts/verify-linux.sh
 ```
 
-验证脚本使用固定版本、固定 SHA256 的核心和 Mihomo，运行各协议转发、完全禁用 IPv6 后的转发、策略路由、IPv6 禁用与恢复，以及自动安装/升级/校验失败测试。
+验证脚本使用固定版本、固定 SHA256 的核心、Mihomo 和 Pebble，运行各协议转发、真实 HTTP-01/IP 证书签发和四种 TLS 协议客户端转发、完全禁用 IPv6 后的转发、策略路由、IPv6 禁用与恢复，以及自动安装/升级/校验失败测试。Pebble 仅作测试 CA，测试根证书只放入临时进程配置。
 
 离线生成 8 份**独立的单协议**示例，并用固定版本核心检查各份服务端及客户端配置：
 

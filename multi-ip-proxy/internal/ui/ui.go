@@ -19,9 +19,10 @@ import (
 )
 
 type UI struct {
-	In      *bufio.Reader
-	Out     io.Writer
-	Context context.Context
+	In       *bufio.Reader
+	Out      io.Writer
+	Context  context.Context
+	Advanced bool
 }
 
 func New(in io.Reader, out io.Writer) *UI {
@@ -147,6 +148,12 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		return s, err
 	}
 	s.Protocol = protocol
+	if s.Protocol == "reality" && old != nil && old.Protocol != "reality" {
+		s.ServerName, s.RealityTarget, s.RealityPort = "www.microsoft.com", "www.microsoft.com", 443
+	}
+	if !s.NeedsTLS() {
+		s.CertificateMode = ""
+	}
 	var candidates []network.Candidate
 	if inventory != "" {
 		f, e := os.Open(inventory)
@@ -176,7 +183,8 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		fmt.Fprintf(u.Out, "%d) %s  网卡=%s  公网=%s\n", i+1, c.LocalIP, c.Interface, public)
 	}
 	var chosen []int
-	for {
+	chosen, _ = Selection("a", len(candidates))
+	for u.Advanced {
 		v, e := u.Ask("选择 IP 序号，逗号分隔；a 表示全部", "a")
 		if e != nil {
 			return s, e
@@ -191,20 +199,29 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 	if s.Protocol == "wireguard" {
 		portPrompt = "WireGuard 起始 UDP 端口（按节点 ID 分配独立端口）"
 	}
-	s.Port, err = u.Number(portPrompt, s.Port, 1, 65535)
-	if err != nil {
-		return s, err
+	if u.Advanced {
+		s.Port, err = u.Number(portPrompt, s.Port, 1, 65535)
+		if err != nil {
+			return s, err
+		}
+	} else {
+		fmt.Fprintf(u.Out, "自动选择全部地址；%s：%d/%s。自定义可运行 wizard --advanced。\n", portPrompt, s.Port, s.Network())
 	}
 	pairs := map[string]bool{}
 	for _, i := range chosen {
 		c := candidates[i]
 		pairs[c.Interface+"/"+c.Gateway] = true
 	}
-	policy := s.Protocol == "wireguard"
-	if policy {
+	policy := s.Protocol == "wireguard" || len(pairs) > 1
+	if old != nil {
+		for _, node := range old.Nodes {
+			policy = policy || node.PolicyRouting
+		}
+	}
+	if s.Protocol == "wireguard" {
 		fmt.Fprintln(u.Out, "WireGuard 自动启用各 IP 的策略路由，确保 UDP 握手回包使用对应 IP；需要网卡、网关与网段。")
-	} else {
-		policy, err = u.Yes("启用独立策略路由（多网卡/多网关时建议启用）", len(pairs) > 1)
+	} else if u.Advanced {
+		policy, err = u.Yes("启用独立策略路由（多网卡/多网关时建议启用）", policy)
 		if err != nil {
 			return s, err
 		}
@@ -222,14 +239,23 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 	publics := map[string]bool{}
 	for _, idx := range chosen {
 		c := candidates[idx]
+		if previous, exists := existing[c.LocalIP]; exists && !u.Advanced {
+			c.PublicIP = previous.PublicIP
+		}
 		if c.PublicIP == "" {
 			fmt.Fprintf(u.Out, "探测 %s 的公网出口……\n", c.LocalIP)
 			c.PublicIP, _ = network.ProbePublicIP(ctx, c.LocalIP)
 		}
 		for {
-			pub, e := u.Ask("本机 "+c.LocalIP+" 对应的公网 IPv4", c.PublicIP)
-			if e != nil {
-				return s, e
+			pub := c.PublicIP
+			address, parseErr := netip.ParseAddr(pub)
+			local, _ := netip.ParseAddr(c.LocalIP)
+			_, saved := existing[c.LocalIP]
+			if u.Advanced || parseErr != nil || !address.Is4() || address.IsPrivate() || publics[pub] || (inventory == "" && local.IsPrivate() && !saved) {
+				pub, err = u.Ask("本机 "+c.LocalIP+" 对应的公网 IPv4（NAT 映射需核实）", c.PublicIP)
+				if err != nil {
+					return s, err
+				}
 			}
 			ip, e := netip.ParseAddr(pub)
 			if e != nil || !ip.Is4() || !ip.IsGlobalUnicast() || ip.IsPrivate() {
@@ -285,7 +311,7 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		}
 		s.Nodes = append(s.Nodes, n)
 	}
-	if s.Protocol == "reality" {
+	if s.Protocol == "reality" && u.Advanced {
 		s.ServerName, err = u.Ask("REALITY 伪装域名/SNI", s.ServerName)
 		if err != nil {
 			return s, err
@@ -300,35 +326,11 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		}
 	}
 	if s.NeedsTLS() {
-		def := s.ServerName
-		if def == "www.microsoft.com" {
-			def = ""
-		}
-		s.ServerName, err = u.Ask("你持有证书的域名（所有节点共用 SNI，实际连接各自 IP）", def)
-		if err != nil {
-			return s, err
-		}
-		s.Certificate, err = u.Ask("PEM 证书/完整链文件路径", s.Certificate)
-		if err != nil {
-			return s, err
-		}
-		s.Certificate, err = filepath.Abs(s.Certificate)
-		if err != nil {
-			return s, err
-		}
-		s.Key, err = u.Ask("PEM 私钥文件路径", s.Key)
-		if err != nil {
-			return s, err
-		}
-		s.Key, err = filepath.Abs(s.Key)
-		if err != nil {
-			return s, err
-		}
-		if _, _, err = config.Certificate(s); err != nil {
+		if err = u.Certificate(&s); err != nil {
 			return s, err
 		}
 	}
-	if s.Protocol == "hysteria2" {
+	if s.Protocol == "hysteria2" && u.Advanced {
 		enabled, e := u.Yes("启用 Salamander 混淆（客户端须支持；会改变 HTTP/3 流量外观）", s.ObfsPassword != "")
 		if e != nil {
 			return s, e
@@ -343,7 +345,7 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		if !enabled {
 			s.ObfsPassword = ""
 		}
-	} else {
+	} else if s.Protocol != "hysteria2" {
 		s.ObfsPassword = ""
 	}
 	if err = s.Validate(); err != nil {
@@ -353,10 +355,89 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 	return s, nil
 }
 
+func (u *UI) Certificate(s *model.State) error {
+	if u.Advanced {
+		fmt.Fprintln(u.Out, "\n1) 自动申请免费公网 IP 证书（无需域名，自动续期）\n2) 使用已有证书/私钥（域名或 IP 证书）")
+	}
+	defMode := 1
+	if s.CertificateMode == "" && s.Certificate != "" {
+		defMode = 2
+	}
+	mode := defMode
+	var err error
+	if u.Advanced {
+		mode, err = u.Number("证书方式", defMode, 1, 2)
+		if err != nil {
+			return err
+		}
+	}
+	if mode == 1 {
+		fmt.Fprintln(u.Out, "采用自动公网 IP 证书，无需购买域名或填写证书路径。")
+		fmt.Fprintln(u.Out, "私钥在服务器本机生成。所选验证 IP 的 TCP 80 必须持续允许公网访问，供签发和自动续期使用。")
+		fmt.Fprintln(u.Out, "证书约 6 天有效，由核心自动续期；所有节点共用证书身份，连接 IP 仍各自独立。")
+		fmt.Fprintln(u.Out, "自动申请使用 Let's Encrypt，选择此方式表示同意其订阅者协议：https://letsencrypt.org/repository/")
+		selected := 1
+		for i, node := range s.Nodes {
+			if u.Advanced {
+				fmt.Fprintf(u.Out, "%d) %s\n", i+1, node.PublicIP)
+			}
+			if node.PublicIP == s.ServerName {
+				selected = i + 1
+			}
+		}
+		if u.Advanced {
+			selected, err = u.Number("用于证书验证的公网 IP", selected, 1, len(s.Nodes))
+			if err != nil {
+				return err
+			}
+		}
+		s.CertificateMode, s.ServerName = "acme-ip", s.Nodes[selected-1].PublicIP
+		fmt.Fprintf(u.Out, "证书验证 IP：%s。\n", s.ServerName)
+		s.Certificate, s.Key = "", ""
+		return nil
+	}
+	if !u.Advanced {
+		_, _, err = config.Certificate(*s)
+		return err
+	}
+	s.CertificateMode = ""
+	def := s.ServerName
+	if def == "www.microsoft.com" {
+		def = ""
+	}
+	s.ServerName, err = u.Ask("证书对应的域名或 IP（全部节点共用证书身份，连接各自 IP）", def)
+	if err != nil {
+		return err
+	}
+	s.Certificate, err = u.Ask("PEM 证书/完整链文件路径", s.Certificate)
+	if err != nil {
+		return err
+	}
+	s.Certificate, err = filepath.Abs(s.Certificate)
+	if err != nil {
+		return err
+	}
+	s.Key, err = u.Ask("PEM 私钥文件路径", s.Key)
+	if err != nil {
+		return err
+	}
+	s.Key, err = filepath.Abs(s.Key)
+	if err != nil {
+		return err
+	}
+	if _, _, err = config.Certificate(*s); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (u *UI) Summary(s model.State) {
 	p, _ := model.Lookup(s.Protocol)
 	fmt.Fprintf(u.Out, "\n协议：%s；节点：%d；全部使用同一协议；本机端口：%d/%s\n", p.Name, len(s.Nodes), s.Port, s.Network())
 	fmt.Fprintln(u.Out, "全部节点仅使用 IPv4；正式部署会禁用整台服务器的 IPv6。")
+	if s.AutomaticCertificate() {
+		fmt.Fprintf(u.Out, "证书：自动申请/续期；验证 IP %s 的 TCP 80 需允许公网访问。\n", s.ServerName)
+	}
 	for _, n := range s.Nodes {
 		fmt.Fprintf(u.Out, "  %s -> 本机 %s:%d -> 预期出口 %s  策略路由=%t\n", s.Endpoint(n), n.LocalIP, s.ListenPort(n), n.PublicIP, n.PolicyRouting)
 	}

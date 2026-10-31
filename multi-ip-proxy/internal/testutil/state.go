@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,6 +49,9 @@ func Cert(t *testing.T, host string) (string, string) {
 		t.Fatal(err)
 	}
 	cert := x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: host}, DNSNames: []string{host}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	if ip := net.ParseIP(host); ip != nil {
+		cert.DNSNames, cert.IPAddresses = nil, []net.IP{ip}
+	}
 	der, err := x509.CreateCertificate(rand.Reader, &cert, &cert, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
