@@ -20,3 +20,5 @@ sudo sh install.sh
 原有 Shell 脚本保留在仓库根目录。
 
 自动证书需要验证 IP 的 TCP 80 允许公网访问。自定义 IP、端口和证书可运行 `mip-proxy wizard --advanced`。
+
+部署成功后直接在控制台打印全部节点：SOCKS5 使用 `IP/端口/用户名/密码`，Shadowsocks 使用 `IP/端口/aes-256-gcm/密码`，其他协议使用标准分享链接或原生 WireGuard 配置。

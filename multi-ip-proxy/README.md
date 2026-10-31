@@ -44,7 +44,7 @@ sudo sh install.sh
 脚本自动识别 amd64/arm64，查询该仓库最新 Release。如果已安装相同版本，复用现有程序；否则下载对应的 `mip-proxy-linux-<架构>.tar.gz`，核对 Release 中 `SHA256SUMS` 后安装，再进入中文菜单。下载失败或校验不符会终止安装。脚本支持通过 `MIP_VERSION` 固定版本：
 
 ```sh
-sudo env MIP_VERSION=v0.1.2 sh install.sh
+sudo env MIP_VERSION=v0.1.3 sh install.sh
 sudo sh install.sh --no-menu
 sh install.sh --download-only ./packages
 ```
@@ -141,6 +141,8 @@ sudo mip-proxy apply --state /var/lib/mip-proxy/state.json
 离线 demo 使用的短期自签证书仅供配置检查/测试，不属于生产证书。
 
 ## 节点导出
+
+部署成功后，在控制台末尾直接打印全部节点，一行一个。VLESS、VMess、Trojan、Hysteria2、TUIC 使用标准分享链接；SOCKS5 为 `IP/端口/用户名/密码`，Shadowsocks（SS）为 `IP/端口/aes-256-gcm/密码`。这里的斜线格式用于控制台复制；订阅文件仍保留标准分享 URI。WireGuard 打印分节点的原生客户端配置。
 
 默认目录 `/var/lib/mip-proxy/export`，目录权限 0700，文件权限 0600：
 

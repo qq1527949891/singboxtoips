@@ -23,6 +23,7 @@ import (
 
 	"mipproxy.local/mipproxy/internal/config"
 	"mipproxy.local/mipproxy/internal/core"
+	"mipproxy.local/mipproxy/internal/export"
 	"mipproxy.local/mipproxy/internal/model"
 	"mipproxy.local/mipproxy/internal/network"
 	"mipproxy.local/mipproxy/internal/store"
@@ -76,7 +77,7 @@ func run(ctx context.Context, args []string) error {
 		help()
 		return nil
 	case "version", "--version":
-		fmt.Printf("mip-proxy 0.1.2 / sing-box %s\n", model.CoreVersion)
+		fmt.Printf("mip-proxy 0.1.3 / sing-box %s\n", model.CoreVersion)
 		return nil
 	case "wizard":
 		inventory := fs.String("inventory", "", "本机/公网 IP 映射 CSV")
@@ -278,16 +279,23 @@ func run(ctx context.Context, args []string) error {
 
 func installed(t *ui.UI, l system.Layout, s model.State) {
 	t.Summary(s)
-	fmt.Println("已启动并设置开机恢复。节点文件：", l.Exports)
-	fmt.Println("服务器 IPv6 已禁用并持久化，全部节点仅使用 IPv4。")
+	fmt.Fprintln(t.Out, "已启动并设置开机恢复。节点文件：", l.Exports)
+	fmt.Fprintln(t.Out, "服务器 IPv6 已禁用并持久化，全部节点仅使用 IPv4。")
 	if s.Protocol == "wireguard" {
-		fmt.Println("请在云安全组、防火墙和 NAT 放行摘要所列的各节点 UDP 端口。")
+		fmt.Fprintln(t.Out, "请在云安全组、防火墙和 NAT 放行摘要所列的各节点 UDP 端口。")
 	} else if s.Protocol == "socks5" {
-		fmt.Printf("SOCKS5：放行 %d/TCP；UDP 中继另用动态端口，需按客户端来源放行并配置 NAT，详见使用说明。\n", s.Port)
+		fmt.Fprintf(t.Out, "SOCKS5：放行 %d/TCP；UDP 中继另用动态端口，需按客户端来源放行并配置 NAT，详见使用说明。\n", s.Port)
 	} else {
-		fmt.Printf("外部连接还需要云安全组、主机防火墙和 NAT 放行 %d/%s。工具未清空或替换现有防火墙。\n", s.Port, s.Network())
+		fmt.Fprintf(t.Out, "外部连接还需要云安全组、主机防火墙和 NAT 放行 %d/%s。工具未清空或替换现有防火墙。\n", s.Port, s.Network())
 	}
-	fmt.Println("运行 mip-proxy doctor 检查认证、转发和实际公网出口。")
+	fmt.Fprintln(t.Out, "运行 mip-proxy doctor 检查认证、转发和实际公网出口。")
+	nodes, err := export.Console(s)
+	if err != nil {
+		fmt.Fprintln(t.Out, "节点打印失败：", err)
+		return
+	}
+	fmt.Fprintln(t.Out, "\n代理节点信息：")
+	fmt.Fprint(t.Out, nodes)
 }
 
 func menu(ctx context.Context, t *ui.UI, l system.Layout, r network.Runner) error {
@@ -325,6 +333,7 @@ func menu(ctx context.Context, t *ui.UI, l system.Layout, r network.Runner) erro
 							}
 							if err == nil {
 								installed(t, l, s)
+								return nil
 							}
 						} else {
 							var path string
