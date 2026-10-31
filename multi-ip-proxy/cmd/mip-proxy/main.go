@@ -77,7 +77,7 @@ func run(ctx context.Context, args []string) error {
 		help()
 		return nil
 	case "version", "--version":
-		fmt.Printf("mip-proxy 0.1.4 / sing-box %s\n", model.CoreVersion)
+		fmt.Printf("mip-proxy 0.1.5 / sing-box %s\n", model.CoreVersion)
 		return nil
 	case "wizard":
 		inventory := fs.String("inventory", "", "本机/公网 IP 映射 CSV")

@@ -44,7 +44,7 @@ sudo sh install.sh
 脚本自动识别 amd64/arm64，查询该仓库最新 Release。如果已安装相同版本，复用现有程序；否则下载对应的 `mip-proxy-linux-<架构>.tar.gz`，核对 Release 中 `SHA256SUMS` 后安装，再进入中文菜单。下载失败或校验不符会终止安装。脚本支持通过 `MIP_VERSION` 固定版本：
 
 ```sh
-sudo env MIP_VERSION=v0.1.4 sh install.sh
+sudo env MIP_VERSION=v0.1.5 sh install.sh
 sudo sh install.sh --no-menu
 sh install.sh --download-only ./packages
 ```
@@ -166,7 +166,7 @@ WireGuard 没有统一分享 URI，因此该协议不生成 `links.txt`、`subsc
 
 向导为 Trojan、Hysteria2、TUIC、WireGuard 自动启用 HTTPS 订阅，并在节点信息后直接打印地址。提供 Mihomo 完整配置、Mihomo proxy-provider 和 sing-box 配置；Trojan、Hysteria2、TUIC 另提供通用 URI/Base64 订阅，WireGuard 另提供每个 IP 的原生 `.conf` 下载地址。WireGuard 原生客户端使用配置文件导入，其自动刷新订阅能力取决于客户端。
 
-订阅绑定证书对应的本机 IPv4：UDP 协议优先使用 TCP 443，Trojan 优先使用 TCP 8443。首次配置会检查已存在的 TCP 监听，依次尝试推荐端口、8443、9443、18443；已有配置保留订阅端口。TCP 和 UDP 的同号端口可以同时使用，实际端口以控制台输出为准。防火墙、云安全组和 NAT 需要额外放行该 TCP 端口；自动 IP 证书仍需持续放行验证 IP 的 TCP 80。
+订阅绑定证书对应的本机 IPv4：UDP 协议优先使用 TCP 443，Trojan 优先使用 TCP 8443。首次配置会检查已存在的 TCP 监听，也会预留此次将创建的代理 TCP 端口，依次尝试推荐端口、8443、9443、18443；已有配置保留订阅端口。推荐端口均不可用时，可通过高级向导输入其他端口。TCP 和 UDP 的同号端口可以同时使用，实际端口以控制台输出为准。防火墙、云安全组和 NAT 需要额外放行该 TCP 端口；自动 IP 证书仍需持续放行验证 IP 的 TCP 80。
 
 地址含随机 256 位令牌，须完整复制给客户端并妥善保管。服务仅生成客户端导出内容，不提供状态文件、备份或服务端私钥下载；HTTPS 自动加载续期证书。更新节点后同一订阅地址返回当前配置，默认保留令牌；更换为不支持订阅的协议时停止订阅服务。旧部署需重新运行向导以启用。
 
@@ -209,7 +209,7 @@ sudo journalctl -u mip-proxy.service -n 100 --no-pager
 
 配置 `/etc/mip-proxy/server.json`，状态/备份 `/var/lib/mip-proxy`，管理程序 `/usr/local/bin/mip-proxy`，独立核心 `/usr/local/lib/mip-proxy/sing-box`。开机路由恢复只使用状态，不访问原始证书文件。
 
-管理操作通过文件锁串行执行；默认状态的导出和检测也会检查事务锁。部署前持久化恢复记录；中断后下一次 apply/rollback 会先恢复未完成事务。`rollback` 恢复上一次部署前的文件、规则、IPv6 状态和服务启用状态；备份路径和恢复文件均限制在本工具管理范围。清理路由前核对其归属，其他程序更改过的规则和路由会保留并报告冲突。
+管理操作通过文件锁串行执行；默认状态的导出和检测也会检查事务锁。部署前持久化恢复记录，并显式停止本工具的全部服务，取消旧服务排队中的自动重启；中断后下一次 apply/rollback 会先恢复未完成事务。`rollback` 恢复上一次部署前的文件、规则、IPv6 状态和服务启用状态；备份路径和恢复文件均限制在本工具管理范围。清理路由前核对其归属，其他程序更改过的规则和路由会保留并报告冲突。
 
 ## 开发与验证
 

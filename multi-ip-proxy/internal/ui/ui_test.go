@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -86,5 +87,47 @@ func TestDefaultWizardOnlyAsksForProtocol(t *testing.T) {
 				t.Fatal("ordinary updates must preserve existing subscription URLs and credentials", err)
 			}
 		})
+	}
+}
+
+func TestTrojanSubscriptionAvoidsThePlannedProxyPort(t *testing.T) {
+	old := testutil.State(t, "trojan")
+	old.Port = 8443
+	csv := filepath.Join(t.TempDir(), "ips.csv")
+	if err := os.WriteFile(csv, []byte("local_ip,public_ip\n10.0.0.10,203.0.113.10\n10.0.0.11,203.0.113.11\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	u := ui.New(strings.NewReader("2\n"), io.Discard)
+	s, err := u.Wizard(context.Background(), network.ExecRunner{}, csv, &old)
+	if err != nil || s.SubscriptionPort == s.Port || s.SubscriptionPort != 9443 {
+		t.Fatal("subscription must avoid a proxy port which is not listening yet", s.SubscriptionPort, err)
+	}
+}
+
+type occupiedPortsRunner struct{}
+
+func (occupiedPortsRunner) Run(_ context.Context, args ...string) ([]byte, error) {
+	switch strings.Join(args, " ") {
+	case "ip -j -4 address show":
+		return []byte(`[{"ifname":"eth0","flags":["UP"],"addr_info":[{"family":"inet","local":"203.0.113.10","prefixlen":24,"scope":"global"},{"family":"inet","local":"203.0.113.11","prefixlen":24,"scope":"global"}]}]`), nil
+	case "ip -j -4 route show table all":
+		return []byte(`[{"dst":"default","gateway":"203.0.113.1","dev":"eth0"}]`), nil
+	case "ss -H -l -n -t":
+		return []byte("LISTEN 0 4096 *:443 *:*\nLISTEN 0 4096 *:8443 *:*\nLISTEN 0 4096 *:9443 *:*\nLISTEN 0 4096 *:18443 *:*"), nil
+	}
+	return nil, nil
+}
+
+func TestAdvancedWizardCanChooseAnUnlistedSubscriptionPort(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("automatic address discovery requires Linux")
+	}
+	// Protocol, addresses, proxy port, policy routing, two public IPs, ACME
+	// mode, certificate IP, and a custom subscription port. No real network I/O.
+	u := ui.New(strings.NewReader("2\n\n\n\n\n\n1\n1\n80\n443\n25443\n"), io.Discard)
+	u.Advanced = true
+	s, err := u.Wizard(context.Background(), occupiedPortsRunner{}, "", nil)
+	if err != nil || s.SubscriptionPort != 25443 {
+		t.Fatal("advanced mode exited before accepting a non-conflicting custom port", s.SubscriptionPort, err)
 	}
 }

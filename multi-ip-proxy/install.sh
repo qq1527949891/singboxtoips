@@ -32,7 +32,7 @@ esac
 printf '%s\n' "$repository" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || fail "仓库格式应为 owner/repo。"
 if [ -n "$requested_version" ]; then
     case "$requested_version" in v*) ;; *) requested_version="v$requested_version" ;; esac
-    printf '%s\n' "$requested_version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' || fail "版本格式无效，例如 v0.1.4。"
+    printf '%s\n' "$requested_version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' || fail "版本格式无效，例如 v0.1.5。"
 fi
 
 if [ -z "$download_only" ]; then
@@ -44,7 +44,7 @@ if [ -z "$download_only" ]; then
     [ "$debian_major" -ge 12 ] || fail "需要 Debian 12 或更新版本。"
     [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1 || fail "需要正在运行的 systemd。"
     missing_dependencies=0
-    for dependency in ip ss sysctl curl sha256sum tar; do
+    for dependency in ip ss sysctl curl sha256sum tar gzip; do
         command -v "$dependency" >/dev/null 2>&1 || missing_dependencies=1
     done
     if [ "$missing_dependencies" -eq 1 ] || [ ! -s /etc/ssl/certs/ca-certificates.crt ]; then
@@ -82,7 +82,7 @@ if [ -z "$manager_binary" ]; then
     tag=$requested_version
     if [ -z "$tag" ]; then
         fetch "https://api.github.com/repos/$repository/releases/latest" "$temporary_dir/release.json" || fail "无法读取最新 Release；请先在仓库发布，或用 MIP_VERSION 指定版本。"
-        tag=$(sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' "$temporary_dir/release.json")
+        tag=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$temporary_dir/release.json")
     fi
     printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' || fail "Release 标签格式无效。"
     installed_version=$(manager_version /usr/local/bin/mip-proxy) || installed_version=

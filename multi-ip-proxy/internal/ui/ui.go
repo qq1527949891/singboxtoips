@@ -58,8 +58,12 @@ func (u *UI) Ask(prompt, def string) (string, error) {
 	return line, nil
 }
 func (u *UI) Number(prompt string, def, min, max int) (int, error) {
+	suggestion := ""
+	if def >= min && def <= max {
+		suggestion = strconv.Itoa(def)
+	}
 	for {
-		v, e := u.Ask(prompt, strconv.Itoa(def))
+		v, e := u.Ask(prompt, suggestion)
 		if e != nil {
 			return 0, e
 		}
@@ -342,23 +346,12 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 		}
 	}
 	if s.SubscriptionEnabled() {
-		if s.SubscriptionPort == 0 || (s.SubscriptionPort == s.Port && strings.Contains(s.Network(), "tcp")) {
-			s.SubscriptionPort = 443
-			if strings.Contains(s.Network(), "tcp") {
-				s.SubscriptionPort = 8443
-			}
-			if inventory == "" {
-				s.SubscriptionPort, err = network.RecommendedTCPPort(ctx, r, s.CertificateNode().LocalIP, s.SubscriptionPort)
-				if err != nil {
-					return s, err
-				}
-			}
+		portRunner := r
+		if inventory != "" {
+			portRunner = nil
 		}
-		if u.Advanced {
-			s.SubscriptionPort, err = u.Number("HTTPS 订阅监听端口（TCP，需允许公网访问）", s.SubscriptionPort, 1, 65535)
-			if err != nil {
-				return s, err
-			}
+		if err = u.subscriptionPort(ctx, portRunner, &s); err != nil {
+			return s, err
 		}
 	}
 	if s.Protocol == "hysteria2" && u.Advanced {
@@ -384,6 +377,39 @@ func (u *UI) Wizard(ctx context.Context, r network.Runner, inventory string, old
 	}
 	u.Summary(s)
 	return s, nil
+}
+
+func (u *UI) subscriptionPort(ctx context.Context, r network.Runner, s *model.State) error {
+	proxyTCP := strings.Contains(s.Network(), "tcp")
+	reserved := []int{80}
+	preferred := 443
+	if proxyTCP {
+		preferred = 8443
+		reserved = append(reserved, s.Port)
+	}
+	if s.SubscriptionPort == 0 || proxyTCP && s.SubscriptionPort == s.Port {
+		port, err := network.RecommendedTCPPort(ctx, r, s.CertificateNode().LocalIP, preferred, reserved...)
+		if err != nil {
+			if !u.Advanced {
+				return err
+			}
+			fmt.Fprintln(u.Out, "无法推荐订阅端口，请手动指定：", err)
+		}
+		s.SubscriptionPort = port
+	}
+	for u.Advanced {
+		port, err := u.Number("HTTPS 订阅监听端口（TCP，需允许公网访问）", s.SubscriptionPort, 1, 65535)
+		if err != nil {
+			return err
+		}
+		if port == 80 || proxyTCP && port == s.Port {
+			fmt.Fprintln(u.Out, "订阅端口不能占用 TCP 80 或代理的 TCP 监听端口，请重新输入。")
+			continue
+		}
+		s.SubscriptionPort = port
+		break
+	}
+	return nil
 }
 
 func (u *UI) Certificate(s *model.State) error {

@@ -79,6 +79,14 @@ output.write_bytes(data)
         self.assertTrue((output / "mip-proxy-linux-amd64.tar.gz").exists())
         self.assertIn("/releases/latest", self.requests()[0])
 
+    def test_latest_accepts_compact_json_and_ignores_quoted_body_text(self):
+        release = {"tag_name": "v0.1.1", "body": 'Example: "tag_name": "v9.9.9"'}
+        (self.fixtures / "release.json").write_text(json.dumps(release, separators=(",", ":")))
+        result, output = self.download()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((output / "mip-proxy-linux-amd64.tar.gz").exists())
+        self.assertIn("/releases/download/v0.1.1/", self.requests()[1])
+
     def test_arm64_and_pinned_version_skip_latest_lookup(self):
         self.environment.update(MIP_TEST_ARCH="aarch64", MIP_VERSION="0.1.1")
         result, output = self.download()

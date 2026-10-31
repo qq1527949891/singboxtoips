@@ -430,10 +430,10 @@ func apply(ctx context.Context, l Layout, r network.Runner, s model.State) (err 
 		}
 	}()
 	for _, name := range Services {
-		if b.Active[name] {
-			if _, err = r.Run(ctx, "systemctl", "stop", name); err != nil {
-				return err
-			}
+		// A failed/activating unit can still have an automatic restart queued.
+		// Stop it explicitly even when is-active reported false in the snapshot.
+		if _, err = r.Run(ctx, "systemctl", "stop", name); err != nil && !missingUnit(ctx, r, name) {
+			return err
 		}
 	}
 	if old != nil {

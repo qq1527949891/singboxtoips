@@ -20,6 +20,7 @@ type serviceRunner struct {
 	failStop              string
 	port80Busy            bool
 	failSubscriptionStart bool
+	pendingRestart        map[string]bool
 }
 
 func (r *serviceRunner) Run(_ context.Context, args ...string) ([]byte, error) {
@@ -68,6 +69,7 @@ func (r *serviceRunner) Run(_ context.Context, args ...string) ([]byte, error) {
 				return nil, fmt.Errorf("injected stop failure")
 			}
 			r.active[name] = false
+			delete(r.pendingRestart, name)
 		case "enable":
 			r.enabled[name] = true
 		case "disable":
@@ -154,6 +156,22 @@ func TestApplyFileRecoversBeforeLoadingBrokenState(t *testing.T) {
 
 func runner() *serviceRunner {
 	return &serviceRunner{active: map[string]bool{}, enabled: map[string]bool{}}
+}
+
+func TestApplyCancelsPendingRestartsOfInactiveOldServices(t *testing.T) {
+	l := Paths(t.TempDir())
+	s := testutil.State(t, "shadowsocks")
+	if err := store.Atomic(l.State, model.JSON(s), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r := runner()
+	r.pendingRestart = map[string]bool{ProxyService: true, SubscriptionService: true}
+	if err := Apply(context.Background(), l, r, s); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.pendingRestart) != 0 {
+		t.Fatal("inactive units retained queued restarts during a deployment", r.pendingRestart)
+	}
 }
 
 func TestInvalidCoreConfigDoesNotStopExistingService(t *testing.T) {
