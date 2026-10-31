@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"mipproxy.local/mipproxy/internal/model"
@@ -90,6 +91,71 @@ func TestWireGuardSubscriptionProvidesNativeClientOnly(t *testing.T) {
 	SubscriptionHandler(l).ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), s.Nodes[0].ClientPrivateKey) || strings.Contains(response.Body.String(), model.WGKey(s.Nodes[0].PrivateKey)) {
 		t.Fatal("incorrect WireGuard configuration access")
+	}
+}
+
+func TestSubscriptionCacheInvalidatesAtomicReplacementAndNeverServesMissingState(t *testing.T) {
+	l := Paths(t.TempDir())
+	s := testutil.State(t, "trojan")
+	s.SubscriptionToken, _ = model.NewSubscriptionToken()
+	s.SubscriptionPort = 8443
+	if err := store.Atomic(l.State, model.JSON(s), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Atomic(l.Lock, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	handler := SubscriptionHandler(l)
+	get := func(token string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/"+token+"/mihomo.yaml", nil))
+		return response
+	}
+	if get(s.SubscriptionToken).Code != http.StatusOK {
+		t.Fatal("initial subscription unavailable")
+	}
+	info, err := os.Stat(l.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := s.SubscriptionToken
+	s.SubscriptionToken, _ = model.NewSubscriptionToken()
+	if err := store.Atomic(l.State, model.JSON(s), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Same-size state and the same timestamp must still invalidate the cache:
+	// deployments replace the inode rather than modifying the file in place.
+	if err := os.Chtimes(l.State, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	var workers sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			if get(old).Code != http.StatusNotFound || get(s.SubscriptionToken).Code != http.StatusOK {
+				t.Error("cached exports ignored credential rotation")
+			}
+		}()
+	}
+	workers.Wait()
+	if err := os.Remove(l.State); err != nil {
+		t.Fatal(err)
+	}
+	if get(s.SubscriptionToken).Code != http.StatusServiceUnavailable {
+		t.Fatal("deleted state continued serving cached credentials")
+	}
+	if err := store.Atomic(l.State, []byte("invalid-state"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if get(s.SubscriptionToken).Code != http.StatusServiceUnavailable {
+		t.Fatal("corrupt state continued serving cached credentials")
+	}
+	if err := store.Atomic(l.State, model.JSON(s), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if get(s.SubscriptionToken).Code != http.StatusOK {
+		t.Fatal("cache did not recover after state restoration")
 	}
 }
 

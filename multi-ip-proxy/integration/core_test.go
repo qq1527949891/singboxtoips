@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -260,6 +261,7 @@ func TestRealCoreTwoIPsTCPAndUDP(t *testing.T) {
 				if e := network.WaitPort(ctx, net.JoinHostPort("127.0.0.1", strconv.Itoa(base+5))); e != nil {
 					t.Fatal(e)
 				}
+				waitMihomoForwarding(t, base+5, tcpEcho.URL, "127.0.0.2")
 				for i := range s.Nodes {
 					hc := http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(export.ProxyURL(base + 5 + i))}, Timeout: 8 * time.Second}
 					resp, e := hc.Get(tcpEcho.URL)
@@ -281,6 +283,12 @@ func TestRealCoreTwoIPsTCPAndUDP(t *testing.T) {
 						t.Fatalf("Mihomo UDP source: %q", reply)
 					}
 				}
+				if os.Getenv("MIP_STABILITY") == "1" {
+					checkRepeatedSessions(t, base+5, tcpEcho.URL, echoIP, udpEcho.LocalAddr().(*net.UDPAddr).Port, len(s.Nodes))
+				}
+			}
+			if os.Getenv("MIP_STABILITY") == "1" {
+				checkRepeatedSessions(t, base, tcpEcho.URL, echoIP, udpEcho.LocalAddr().(*net.UDPAddr).Port, len(s.Nodes))
 			}
 			// Generated exports must remain strict; custom certificate trust above is test-only.
 			files, e := export.Files(testutil.State(t, p.ID))
@@ -295,6 +303,79 @@ func TestRealCoreTwoIPsTCPAndUDP(t *testing.T) {
 	}
 }
 
+func waitMihomoForwarding(t *testing.T, port int, echoURL, expected string) {
+	t.Helper()
+	// Mihomo opens listeners while the tunnel is still suspended/inner-loading
+	// (executor.ApplyConfig). A listening socket does not indicate readiness.
+	// Retry only this startup health check; session churn below never retries.
+	transport := &http.Transport{Proxy: http.ProxyURL(export.ProxyURL(port)), DisableKeepAlives: true}
+	defer transport.CloseIdleConnections()
+	client := http.Client{Transport: transport, Timeout: time.Second}
+	deadline := time.Now().Add(5 * time.Second)
+	var lastError error
+	for time.Now().Before(deadline) {
+		response, err := client.Get(echoURL)
+		lastError = err
+		if err == nil {
+			body, readError := io.ReadAll(response.Body)
+			response.Body.Close()
+			if readError == nil && response.StatusCode == http.StatusOK && string(body) == expected {
+				return
+			}
+			lastError = fmt.Errorf("HTTP %d, source %q, read error %v", response.StatusCode, body, readError)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("Mihomo never became ready for forwarding:", lastError)
+}
+
+func checkRepeatedSessions(t *testing.T, base int, echoURL, echoIP string, udpPort, nodes int) {
+	t.Helper()
+	const workers, iterations = 4, 24
+	var group sync.WaitGroup
+	errors := make(chan error, workers)
+	for worker := 0; worker < workers; worker++ {
+		group.Add(1)
+		go func(worker int) {
+			defer group.Done()
+			node := worker % nodes
+			expected := fmt.Sprintf("127.0.0.%d", node+2)
+			transport := &http.Transport{Proxy: http.ProxyURL(export.ProxyURL(base + node)), DisableKeepAlives: true}
+			defer transport.CloseIdleConnections()
+			client := http.Client{Transport: transport, Timeout: 5 * time.Second}
+			for i := 0; i < iterations; i++ {
+				response, err := client.Get(echoURL)
+				if err != nil {
+					errors <- fmt.Errorf("repeated TCP session: %w", err)
+					return
+				}
+				body, readError := io.ReadAll(response.Body)
+				response.Body.Close()
+				if readError != nil || string(body) != expected {
+					errors <- fmt.Errorf("repeated TCP source %q, want %q: %v", body, expected, readError)
+					return
+				}
+				payload := fmt.Sprintf("session-%d-%d", worker, i)
+				// Emulate separate client machines for separate node listeners.
+				// A shared source IP with rapidly recycled ephemeral UDP ports can
+				// otherwise reuse Mihomo's still-live NAT entry for another node.
+				sourceIP := net.ParseIP(fmt.Sprintf("127.0.1.%d", node+10))
+				reply, err := probe.UDPExchangeFromContext(context.Background(), sourceIP, base+node, echoIP, udpPort, []byte(payload))
+				if err != nil || string(reply) != expected+"|"+payload {
+					errors <- fmt.Errorf("repeated UDP session/source: %v; reply %q", err, reply)
+					return
+				}
+			}
+		}(worker)
+	}
+	group.Wait()
+	close(errors)
+	for err := range errors {
+		t.Error(err)
+	}
+	t.Logf("connection churn: %d TCP short connections and %d UDP associations across %d IP nodes", workers*iterations, workers*iterations, nodes)
+}
+
 func runIP(t *testing.T, args ...string) {
 	t.Helper()
 	if b, err := exec.Command("ip", args...).CombinedOutput(); err != nil {
@@ -304,6 +385,7 @@ func runIP(t *testing.T, args ...string) {
 
 func startMihomo(t *testing.T, binary string, c map[string]any) {
 	t.Helper()
+	c["log-level"] = "debug" // Persist diagnostics; emit only when the test fails.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	if err := os.WriteFile(path, model.JSON(c), 0600); err != nil {
@@ -329,6 +411,9 @@ func startMihomo(t *testing.T, binary string, c map[string]any) {
 		_ = logFile.Close()
 		if t.Failed() {
 			b, _ := os.ReadFile(logFile.Name())
+			if len(b) > 16000 {
+				b = append(append(b[:5000:5000], []byte("\n... intermediate debug logs omitted ...\n")...), b[len(b)-11000:]...)
+			}
 			t.Logf("Mihomo logs:\n%s", b)
 		}
 	})

@@ -28,10 +28,12 @@ done
 go test -c -o .cache/integration.test ./integration
 go test -c -o .cache/network.test ./internal/network
 go test -c -o .cache/system.test ./internal/system
-as_root env MIP_PEBBLE=./.cache/pebble MIP_CORE=./.cache/sing-box-linux MIP_MIHOMO=./.cache/mihomo-linux unshare -n sh integration/run-isolated.sh ./.cache/integration.test -test.v -test.timeout=180s
+go test -race ./internal/system ./internal/store ./internal/network ./internal/probe
+as_root env MIP_STABILITY=1 MIP_PEBBLE=./.cache/pebble MIP_CORE=./.cache/sing-box-linux MIP_MIHOMO=./.cache/mihomo-linux unshare -n sh integration/run-isolated.sh ./.cache/integration.test -test.v -test.timeout=180s
 as_root env MIP_TEST_DISABLE_IPV6=1 MIP_PEBBLE=./.cache/pebble MIP_CORE=./.cache/sing-box-linux MIP_MIHOMO=./.cache/mihomo-linux unshare -n sh integration/run-isolated.sh ./.cache/integration.test -test.v -test.timeout=180s
 as_root env MIP_ROUTE_INTEGRATION=1 unshare -n ./.cache/network.test -test.run=TestLinuxRoutesIntegration -test.v
 as_root env MIP_PORT_INTEGRATION=1 unshare -n ./.cache/network.test -test.run=TestLinuxSubscriptionPortReservation -test.v
 as_root env MIP_IPV6_INTEGRATION=1 unshare -n ./.cache/system.test -test.run=TestLinuxIPv6DisableAndRestore -test.v
 as_root env MIP_SUBSCRIPTION_INTEGRATION=1 unshare -m -n ./.cache/system.test -test.run=TestLinuxHTTPSSubscriptionLifecycle -test.v
+as_root env MIP_SYSTEMD_INTEGRATION=1 ./.cache/system.test -test.run=TestLinuxSystemdRecoversDependenciesAndRepeatedExits -test.v -test.timeout=90s
 as_root env PATH="$PATH" python3 -m unittest discover -s scripts -p 'test_*.py' -v

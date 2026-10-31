@@ -101,12 +101,23 @@ func TestLinuxHTTPSSubscriptionLifecycle(t *testing.T) {
 	if err := writeSubscriptionTLS(l, append(append(cert, '\n'), key...)); err != nil {
 		t.Fatal(err)
 	}
-	renewed, err := client.Get(address)
-	if err != nil {
-		t.Fatal(err)
+	loadedRenewal := false
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		transport.CloseIdleConnections()
+		renewed, err := client.Get(address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, renewed.Body)
+		renewed.Body.Close()
+		if renewed.StatusCode == http.StatusOK && string(firstCertificate) != string(renewed.TLS.PeerCertificates[0].Raw) {
+			loadedRenewal = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	renewed.Body.Close()
-	if renewed.StatusCode != http.StatusOK || string(firstCertificate) == string(renewed.TLS.PeerCertificates[0].Raw) {
+	if !loadedRenewal {
 		t.Fatal("HTTPS did not load renewed certificate without restarting")
 	}
 	wrong, err := client.Get(strings.Replace(address, s.SubscriptionToken, "invalid-token", 1))

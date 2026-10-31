@@ -44,7 +44,7 @@ sudo sh install.sh
 脚本自动识别 amd64/arm64，查询该仓库最新 Release。如果已安装相同版本，复用现有程序；否则下载对应的 `mip-proxy-linux-<架构>.tar.gz`，核对 Release 中 `SHA256SUMS` 后安装，再进入中文菜单。下载失败或校验不符会终止安装。脚本支持通过 `MIP_VERSION` 固定版本：
 
 ```sh
-sudo env MIP_VERSION=v0.1.5 sh install.sh
+sudo env MIP_VERSION=v0.1.6 sh install.sh
 sudo sh install.sh --no-menu
 sh install.sh --download-only ./packages
 ```
@@ -209,6 +209,12 @@ sudo journalctl -u mip-proxy.service -n 100 --no-pager
 
 配置 `/etc/mip-proxy/server.json`，状态/备份 `/var/lib/mip-proxy`，管理程序 `/usr/local/bin/mip-proxy`，独立核心 `/usr/local/lib/mip-proxy/sing-box`。开机路由恢复只使用状态，不访问原始证书文件。
 
+代理、订阅和回落页进程退出后每 5 秒自动重启，关闭 systemd 的启动次数限制。依赖服务暂时启动失败时也会重试；手动停止路由服务会连带停止代理和订阅，手动重启则重新启动依赖服务。正常的手动停止不会被自动重启撤销。日志按服务限制速率，辅助 HTTP 服务限制文件描述符；这些设置不保证网络或上游服务始终可用。
+
+HTTPS 订阅与本机回落页各最多处理 64 个并发 HTTP 连接，设置请求头、请求体、写入和空闲超时，防止慢连接长期占用资源；代理核心的节点连接不受这个 64 连接上限限制。订阅配置按状态文件缓存，更新配置或令牌后立即失效；证书最多每秒重新检查一次，续期文件短暂不可用时保留仍然有效的旧证书，过期证书不会继续用于新的 TLS 握手。
+
+从旧版本升级后需运行安装向导的“创建/更新节点”，才能写入新的服务配置并重启辅助进程。只替换程序文件不会更新已运行的进程或 systemd 单元。
+
 管理操作通过文件锁串行执行；默认状态的导出和检测也会检查事务锁。部署前持久化恢复记录，并显式停止本工具的全部服务，取消旧服务排队中的自动重启；中断后下一次 apply/rollback 会先恢复未完成事务。`rollback` 恢复上一次部署前的文件、规则、IPv6 状态和服务启用状态；备份路径和恢复文件均限制在本工具管理范围。清理路由前核对其归属，其他程序更改过的规则和路由会保留并报告冲突。
 
 ## 开发与验证
@@ -223,7 +229,7 @@ python3 scripts/build.py
 
 GitHub 仓库中源码位于 `multi-ip-proxy/`。根目录的 `.github/workflows/mip-proxy-release.yml` 在源码更新后自动构建、运行验证，通过后按程序版本创建 Release；已存在的版本不会覆盖，修改后发布需提升程序版本。
 
-在 Linux 开发机安装 Go、Python 3、iproute2、procps、curl 后，可运行完整验证（需要 root 或 sudo 创建隔离命名空间）：
+在 Linux 开发机安装 Go、GCC（竞态检查需要）、Python 3、iproute2、procps、curl 后，可运行完整验证（需要 root 或 sudo 创建隔离命名空间）：
 
 ```sh
 python3 scripts/build.py
@@ -231,6 +237,8 @@ sh scripts/verify-linux.sh
 ```
 
 验证脚本使用固定版本、固定 SHA256 的核心、Mihomo 和 Pebble，运行各协议转发、真实 HTTP-01/IP 证书签发和四种 TLS 协议客户端转发、WireGuard 订阅所需的独立证书申请、完全禁用 IPv6 后的转发、策略路由、IPv6 禁用与恢复、HTTPS 订阅访问/证书更新/只读服务环境，以及自动安装/升级/校验失败测试。WireGuard 的控制台单行输出会直接交给 Mihomo 验证 TCP/UDP 转发。Pebble 仅作测试 CA，测试根证书只放入临时进程配置。
+
+稳定性检查包含 Go 竞态检测、辅助 HTTP 服务反复启停后的 goroutine 和文件描述符回收、不完整请求体超时、并发 TLS 握手与续期失败恢复、订阅令牌轮换和状态损坏恢复。真实核心测试使用 sing-box 与 Mihomo 客户端，分别对每种协议执行 96 次 TCP 短连接和 96 次 UDP 关联，验证双 IP 出口；先通过转发健康检查等待客户端完全启动，压力阶段遇到错误直接失败。GitHub CI 使用真实 systemd 加载生成的服务配置，注入路由启动失败、连续正常退出、SIGKILL，以及依赖服务的手动重启/停止；测试使用独立临时服务，不改动主机网络。没有运行 systemd 的本地环境会明确跳过这一项。
 
 离线生成 8 份**独立的单协议**示例，并用固定版本核心检查各份服务端及客户端配置：
 
@@ -266,4 +274,4 @@ sudo env MIP_ROUTE_INTEGRATION=1 unshare -n /tmp/mip-network.test -test.run Test
 
 实际跨公网连通性、云平台 NAT、安全组及受限网络中的抗封锁表现，仍需在目标服务器与外部网络验收。
 
-开发验证在 Debian 13 的隔离网络命名空间完成。amd64 版本运行过真实核心和客户端转发测试；arm64 为交叉编译产物，尚未在 arm64 机器上实测。当前测试环境未运行 systemd，部署事务与服务失败回滚通过模拟测试验证，正式服务器上的服务生命周期仍需验收。
+开发验证在 Debian 13 的隔离网络命名空间完成，真实 systemd 生命周期在 GitHub Ubuntu 24.04 CI 验证。amd64 版本运行过真实核心和客户端转发测试；arm64 为交叉编译产物，尚未在 arm64 机器上实测。短时压力与故障注入不能代替目标服务器数周的运行观察，也不能保证第三方核心永不崩溃。

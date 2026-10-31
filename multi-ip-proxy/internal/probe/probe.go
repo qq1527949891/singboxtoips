@@ -194,9 +194,18 @@ func UDPExchange(proxyPort int, host string, port int, payload []byte) ([]byte, 
 }
 
 func UDPExchangeContext(ctx context.Context, proxyPort int, host string, port int, payload []byte) ([]byte, error) {
+	return UDPExchangeFromContext(ctx, nil, proxyPort, host, port, payload)
+}
+
+// UDPExchangeFromContext can bind a diagnostic client identity. Keep TCP and
+// UDP source addresses equal, as required by SOCKS5 UDP association filtering.
+func UDPExchangeFromContext(ctx context.Context, sourceIP net.IP, proxyPort int, host string, port int, payload []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	dialer := net.Dialer{Timeout: 3 * time.Second}
+	if sourceIP != nil {
+		dialer.LocalAddr = &net.TCPAddr{IP: sourceIP}
+	}
 	c, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(proxyPort)))
 	if err != nil {
 		return nil, err
@@ -263,7 +272,11 @@ func UDPExchangeContext(ctx context.Context, proxyPort int, host string, port in
 	if err != nil {
 		return nil, err
 	}
-	udp, err := net.DialUDP("udp", nil, udpAddr)
+	var localUDP *net.UDPAddr
+	if sourceIP != nil {
+		localUDP = &net.UDPAddr{IP: sourceIP}
+	}
+	udp, err := net.DialUDP("udp", localUDP, udpAddr)
 	if err != nil {
 		return nil, err
 	}

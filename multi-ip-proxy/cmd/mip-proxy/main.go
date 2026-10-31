@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -21,7 +20,6 @@ import (
 	"syscall"
 	"time"
 
-	"mipproxy.local/mipproxy/internal/config"
 	"mipproxy.local/mipproxy/internal/core"
 	"mipproxy.local/mipproxy/internal/export"
 	"mipproxy.local/mipproxy/internal/model"
@@ -77,7 +75,7 @@ func run(ctx context.Context, args []string) error {
 		help()
 		return nil
 	case "version", "--version":
-		fmt.Printf("mip-proxy 0.1.5 / sing-box %s\n", model.CoreVersion)
+		fmt.Printf("mip-proxy 0.1.6 / sing-box %s\n", model.CoreVersion)
 		return nil
 	case "wizard":
 		inventory := fs.String("inventory", "", "本机/公网 IP 映射 CSV")
@@ -246,17 +244,7 @@ func run(ctx context.Context, args []string) error {
 		}
 		return system.Rollback(ctx, l, r)
 	case "cover":
-		server := http.Server{Addr: "127.0.0.1:18080", ReadHeaderTimeout: 5 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("Cache-Control", "no-cache")
-			_, _ = io.WriteString(w, config.CoverHTML)
-		})}
-		go func() { <-ctx.Done(); _ = server.Close() }()
-		err := server.ListenAndServe()
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return err
+		return system.ServeCover(ctx)
 	case "subscriptions":
 		if len(args) == 1 || len(args) == 2 && args[1] == "show" {
 			return system.ShowSubscriptions(l, os.Stdout)

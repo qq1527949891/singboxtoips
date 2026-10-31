@@ -5,12 +5,12 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"mipproxy.local/mipproxy/internal/export"
@@ -21,6 +21,12 @@ import (
 // Generate only client exports. No directory is exposed as a web root, so
 // state, backups, ACME account keys and server private keys cannot be fetched.
 func SubscriptionHandler(l Layout) http.Handler {
+	var cache struct {
+		sync.Mutex
+		info  os.FileInfo
+		state model.State
+		files map[string][]byte
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodGet && request.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
@@ -35,20 +41,39 @@ func SubscriptionHandler(l Layout) http.Handler {
 		status := http.StatusOK
 		var data []byte
 		err := managedReadWithLock(l, l.State, "", readLock, func() error {
-			state, err := model.Load(l.State)
+			cache.Lock()
+			defer cache.Unlock()
+			stateFile, err := os.Open(l.State)
 			if err != nil {
 				return err
 			}
+			// Capture file identity now, including on development platforms
+			// where path-based Stat defers resolving the file identifier.
+			info, err := stateFile.Stat()
+			stateFile.Close()
+			if err != nil {
+				return err
+			}
+			if cache.info == nil || !os.SameFile(cache.info, info) || cache.info.Size() != info.Size() || !cache.info.ModTime().Equal(info.ModTime()) {
+				state, err := model.Load(l.State)
+				if err != nil {
+					return err
+				}
+				cache.state, cache.info, cache.files = state, info, nil
+			}
+			state := cache.state
 			if !state.SubscriptionEnabled() || subtle.ConstantTimeCompare([]byte(token), []byte(state.SubscriptionToken)) != 1 {
 				status = http.StatusNotFound
 				return nil
 			}
-			files, err := export.Files(state)
-			if err != nil {
-				return err
+			if cache.files == nil {
+				cache.files, err = export.Files(state)
+				if err != nil {
+					return err
+				}
 			}
 			var exists bool
-			data, exists = files[filename]
+			data, exists = cache.files[filename]
 			if !exists {
 				status = http.StatusNotFound
 			}
@@ -106,6 +131,7 @@ func loadSubscriptionCertificate(l Layout, state model.State, roots *x509.CertPo
 	if time.Now().Before(leaf.NotBefore) || time.Now().After(leaf.NotAfter) {
 		return nil, fmt.Errorf("订阅 HTTPS 证书尚未生效或已过期")
 	}
+	pair.Leaf = leaf
 	return &pair, nil
 }
 
@@ -123,18 +149,10 @@ func ServeSubscriptions(ctx context.Context, l Layout) error {
 	if err != nil {
 		return fmt.Errorf("HTTPS 订阅端口 %s 无法监听：%w", state.SubscriptionListenAddress(), err)
 	}
-	defer listener.Close()
-	server := http.Server{
-		Handler: SubscriptionHandler(l), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
-		WriteTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192,
-		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return subscriptionCertificate(l, state) }},
-	}
-	go func() { <-ctx.Done(); _ = server.Close() }()
-	err = server.ServeTLS(listener, "", "")
-	if errors.Is(err, http.ErrServerClosed) {
-		return nil
-	}
-	return err
+	reloader := certificateReloader{now: time.Now, load: func() (*tls.Certificate, error) { return subscriptionCertificate(l, state) }}
+	server := auxiliaryHTTPServer(SubscriptionHandler(l))
+	server.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: reloader.get}
+	return serveHTTP(ctx, server, listener, true)
 }
 
 func CheckSubscriptions(ctx context.Context, l Layout) error {

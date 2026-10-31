@@ -40,7 +40,7 @@ jobs:
       - name: Unit tests, vet and static release packages
         working-directory: source/multi-ip-proxy
         run: python3 scripts/build.py
-      - name: Real protocol, routing, IPv6 and installer tests
+      - name: Real protocols, concurrency, systemd recovery and installer tests
         working-directory: source/multi-ip-proxy
         run: sh scripts/verify-linux.sh
       - name: Publish versioned release after successful checks

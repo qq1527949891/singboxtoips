@@ -46,17 +46,18 @@ func quote(s string) string {
 }
 func Units(l Layout, s model.State) map[string][]byte {
 	extra := ""
+	pre := fmt.Sprintf("ExecStartPre=/usr/bin/systemctl start %s\nExecStartPre=%s ipv6 disable\n", RoutesService, quote(l.App))
 	if s.Protocol == "trojan" {
-		extra = "Requires=" + CoverService + "\nAfter=" + CoverService + "\n"
+		extra = "Wants=" + CoverService + "\nAfter=" + CoverService + "\nPartOf=" + CoverService + "\n"
+		pre += "ExecStartPre=/usr/bin/systemctl start " + CoverService + "\n"
 	}
-	proxy := fmt.Sprintf("[Unit]\nDescription=Multi IP proxy nodes\nWants=network-online.target\nAfter=network-online.target %s\nRequires=%s\n%s\n[Service]\nType=simple\nExecStartPre=%s check -c %s\nExecStart=%s run -c %s\nRestart=on-failure\nRestartSec=3\nLimitNOFILE=65536\nUMask=0077\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\nProtectSystem=strict\nCapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW\n\n[Install]\nWantedBy=multi-user.target\n", RoutesService, RoutesService, extra, quote(l.Core), quote(l.Config), quote(l.Core), quote(l.Config))
-	proxy = strings.Replace(proxy, "ExecStartPre=", "ExecStartPre="+quote(l.App)+" ipv6 disable\nExecStartPre=", 1)
+	proxy := fmt.Sprintf("[Unit]\nDescription=Multi IP proxy nodes\nWants=network-online.target %s\nAfter=network-online.target %s\nPartOf=%s\nStartLimitIntervalSec=0\n%s\n[Service]\nType=simple\n%sExecStartPre=%s check -c %s\nExecStart=%s run -c %s\nRestart=always\nRestartSec=5\nTimeoutStopSec=20\nLimitNOFILE=65536\nLogRateLimitIntervalSec=30s\nLogRateLimitBurst=200\nUMask=0077\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\nProtectSystem=strict\nCapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW\n\n[Install]\nWantedBy=multi-user.target\n", RoutesService, RoutesService, RoutesService, extra, pre, quote(l.Core), quote(l.Config), quote(l.Core), quote(l.Config))
 	if s.AutomaticCertificate() {
 		proxy = strings.Replace(proxy, "ProtectSystem=strict\n", "ProtectSystem=strict\nReadWritePaths="+quote(l.ACME)+"\n", 1)
 	}
-	routes := fmt.Sprintf("[Unit]\nDescription=Routes for multi IP proxy nodes\nWants=network-online.target\nAfter=network-online.target\nBefore=%s\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=%s routes up --state %s\nExecStop=%s routes down --state %s\nTimeoutStartSec=90\nTimeoutStopSec=90\nUMask=0077\n\n[Install]\nWantedBy=multi-user.target\n", ProxyService, quote(l.App), quote(l.State), quote(l.App), quote(l.State))
-	cover := fmt.Sprintf("[Unit]\nDescription=HTTP fallback for Trojan listener\nAfter=network.target\n\n[Service]\nType=simple\nExecStart=%s cover\nRestart=on-failure\nUMask=0077\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\nProtectSystem=strict\nCapabilityBoundingSet=\n\n[Install]\nWantedBy=multi-user.target\n", quote(l.App))
-	subscription := fmt.Sprintf("[Unit]\nDescription=Private HTTPS proxy subscriptions\nAfter=network-online.target %s\nRequires=%s\n\n[Service]\nType=simple\nExecStart=%s subscriptions serve\nRestart=on-failure\nRestartSec=3\nUMask=0077\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\nProtectSystem=strict\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE\n\n[Install]\nWantedBy=multi-user.target\n", ProxyService, ProxyService, quote(l.App))
+	routes := fmt.Sprintf("[Unit]\nDescription=Routes for multi IP proxy nodes\nWants=network-online.target\nAfter=network-online.target\nBefore=%s\nStartLimitIntervalSec=0\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=%s routes up --state %s\nExecStop=%s routes down --state %s\nTimeoutStartSec=90\nTimeoutStopSec=90\nUMask=0077\n\n[Install]\nWantedBy=multi-user.target\n", ProxyService, quote(l.App), quote(l.State), quote(l.App), quote(l.State))
+	cover := fmt.Sprintf("[Unit]\nDescription=HTTP fallback for Trojan listener\nAfter=network.target\nStartLimitIntervalSec=0\n\n[Service]\nType=simple\nExecStart=%s cover\nRestart=always\nRestartSec=5\nTimeoutStopSec=20\nLimitNOFILE=512\nLogRateLimitIntervalSec=30s\nLogRateLimitBurst=200\nUMask=0077\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\nProtectSystem=strict\nCapabilityBoundingSet=\n\n[Install]\nWantedBy=multi-user.target\n", quote(l.App))
+	subscription := fmt.Sprintf("[Unit]\nDescription=Private HTTPS proxy subscriptions\nAfter=network-online.target %s\nWants=%s\nPartOf=%s\nStartLimitIntervalSec=0\n\n[Service]\nType=simple\nExecStartPre=/usr/bin/systemctl start %s\nExecStart=%s subscriptions serve\nRestart=always\nRestartSec=5\nTimeoutStopSec=20\nLimitNOFILE=512\nLogRateLimitIntervalSec=30s\nLogRateLimitBurst=200\nUMask=0077\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\nProtectSystem=strict\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE\n\n[Install]\nWantedBy=multi-user.target\n", ProxyService, ProxyService, ProxyService, ProxyService, quote(l.App))
 	return map[string][]byte{ProxyService: []byte(proxy), RoutesService: []byte(routes), CoverService: []byte(cover), SubscriptionService: []byte(subscription)}
 }
 
